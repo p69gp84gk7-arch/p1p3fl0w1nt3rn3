@@ -7,6 +7,7 @@ import { COURONNES, type Couronnes, type Layer, type NetNode, type NodeType, typ
 import { NumField, Row, Section, TextField, Toggle } from './fields';
 import { BASE_LAYERS, fmt, STATUS_COLOR, STATUS_LABEL } from './display';
 import { newId } from '../model/ids';
+import { SheetHeader } from './MobileNav';
 import { REFERENCE_NAME, REFERENCE_VERSION } from '../data/reference';
 
 export default function SidePanel() {
@@ -17,6 +18,9 @@ export default function SidePanel() {
   const pipe = selection?.kind === 'pipe' ? net.pipes.find((p) => p.id === selection.id) : undefined;
   return (
     <aside className="sidepanel">
+      <div className="mobile-only">
+        <SheetHeader title={node ? `${NODE_LABEL[node.type]} ${node.nom}` : pipe ? `Canalisation ${pipe.nom}` : 'Réseau & pompage'} />
+      </div>
       {tool.kind === 'draw' && <DrawSpecPicker />}
       {node ? <NodeEditor key={node.id} node={node} /> : pipe ? <PipeEditor key={pipe.id} pipe={pipe} /> : <Overview />}
     </aside>
@@ -280,6 +284,7 @@ function NodeEditor({ node }: { node: NetNode }) {
           onClick={() => {
             st().set('profileTarget', node.id);
             st().set('bottomTab', 'profil');
+            st().set('mobileSheet', 'tableaux');
             if (!st().results || st().stale) st().runCalc();
           }}
         >

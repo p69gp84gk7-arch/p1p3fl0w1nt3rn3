@@ -19,8 +19,10 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
   const st = useStore.getState;
   const [menu, setMenu] = useState<'fichier' | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [mobileMenu, setMobileMenu] = useState(false);
 
   const calc = (statique = false) => {
+    setMobileMenu(false);
     const r = st().runCalc(statique);
     if (r.messages.length && !r.converged) st().toast(r.messages[0], 'error');
     else if (r.messages.length) st().toast(r.messages[0], 'info');
@@ -87,13 +89,21 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
         </div>
       </div>
 
+      <div className={`topbar-collapsible ${mobileMenu ? 'open' : ''}`}>
       <div className="topbar-group">
         <div className="menu">
           <button className="btn" onClick={() => setMenu(menu ? null : 'fichier')}>
             Fichier ▾
           </button>
           {menu === 'fichier' && (
-            <div className="menu-pop" onMouseLeave={() => setMenu(null)} onClick={() => setMenu(null)}>
+            <div
+              className="menu-pop"
+              onMouseLeave={() => setMenu(null)}
+              onClick={() => {
+                setMenu(null);
+                setMobileMenu(false);
+              }}
+            >
               <button onClick={() => openDialog('import')}>📥 Importer KMZ / CSV / JSON…</button>
               <button
                 onClick={() => {
@@ -142,7 +152,13 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
 
       <div className="topbar-group scenario">
         <label className="muted small">Scénario</label>
-        <select value={scenario} onChange={(e) => st().loadScenario(e.target.value)}>
+        <select
+          value={scenario}
+          onChange={(e) => {
+            st().loadScenario(e.target.value);
+            setMobileMenu(false);
+          }}
+        >
           <option value="">État actuel</option>
           {net.scenarios.map((s) => (
             <option key={s.nom} value={s.nom}>
@@ -153,6 +169,19 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
         <button className="btn" title="Enregistrer l’état des enneigeurs comme scénario" onClick={saveScenario}>
           ＋
         </button>
+      </div>
+
+      <div className="topbar-group actions" onClick={() => setMobileMenu(false)}>
+        <button className="btn" onClick={() => calc(true)} title="Tous les enneigeurs à l’arrêt : vérifie les pressions maximales (PN)">
+          Pression statique
+        </button>
+        <button className="btn icon" title="Réglages" onClick={() => openDialog('settings')}>
+          ⚙<span className="mobile-only"> Réglages</span>
+        </button>
+        <button className="btn icon" title="Aide" onClick={() => openDialog('help')}>
+          ?<span className="mobile-only"> Aide</span>
+        </button>
+      </div>
       </div>
 
       <div className="topbar-group grow-right">
@@ -166,17 +195,11 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
             {stale && <span className="muted">à recalculer</span>}
           </div>
         )}
-        <button className="btn" onClick={() => calc(true)} title="Tous les enneigeurs à l’arrêt : vérifie les pressions maximales (PN)">
-          Pression statique
-        </button>
         <button className="btn primary" onClick={() => calc()} title="Lancer le calcul (Ctrl+Entrée)">
           ▶ Calculer
         </button>
-        <button className="btn icon" title="Réglages" onClick={() => openDialog('settings')}>
-          ⚙
-        </button>
-        <button className="btn icon" title="Aide" onClick={() => openDialog('help')}>
-          ?
+        <button className={`btn icon mobile-only ${mobileMenu ? 'active' : ''}`} title="Menu" aria-expanded={mobileMenu} onClick={() => setMobileMenu(!mobileMenu)}>
+          {mobileMenu ? '✕' : '☰'}
         </button>
       </div>
     </header>

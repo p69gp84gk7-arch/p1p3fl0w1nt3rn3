@@ -29,7 +29,14 @@ export default function BottomDrawer() {
           </button>
         ))}
         {tab && (
-          <button className="drawer-close" onClick={() => st().set('bottomTab', null)} title="Réduire">
+          <button
+            className="drawer-close"
+            onClick={() => {
+              st().set('bottomTab', null);
+              st().set('mobileSheet', null);
+            }}
+            title="Réduire"
+          >
             ▾
           </button>
         )}

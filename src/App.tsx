@@ -11,6 +11,8 @@ import ImportDialog from './components/ImportDialog';
 import SettingsDialog from './components/SettingsDialog';
 import HelpDialog from './components/HelpDialog';
 import { firstVisit, useStore } from './store';
+import MobileNav from './components/MobileNav';
+import { useIsMobile } from './components/useIsMobile';
 import { deleteNode, deletePipe } from './model/edit';
 
 export type Dialog = 'import' | 'settings' | 'help' | null;
@@ -21,13 +23,23 @@ export default function App() {
   const busy = useStore((s) => s.busy);
   const tool = useStore((s) => s.tool);
 
+  const isMobile = useIsMobile();
+  const sheet = useStore((s) => s.mobileSheet);
+  const selection = useStore((s) => s.selection);
   useKeyboardShortcuts();
+  // Téléphone : une sélection ouvre sa fiche ; un outil de dessin libère la carte.
+  useEffect(() => {
+    if (isMobile && selection) useStore.getState().set('mobileSheet', 'panneau');
+  }, [isMobile, selection]);
+  useEffect(() => {
+    if (isMobile && tool.kind !== 'select' && useStore.getState().mobileSheet === 'outils') useStore.getState().set('mobileSheet', null);
+  }, [isMobile, tool.kind]);
   useEffect(() => {
     if (firstVisit) void useStore.getState().loadReference();
   }, []);
 
   return (
-    <div className={`app tool-${tool.kind}`}>
+    <div className={`app tool-${tool.kind} ${isMobile ? 'is-mobile' : ''} ${isMobile && sheet ? `sheet-${sheet}` : ''}`}>
       <TopBar openDialog={setDialog} />
       <div className="workspace">
         <Toolbar />
@@ -49,6 +61,7 @@ export default function App() {
         </div>
       )}
       <Toasts />
+      {isMobile && <MobileNav />}
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { NODE_LABEL, NODE_TYPES } from '../model/defaults';
 import type { NodeLabelField, PipeLabelField } from '../services/storage';
 import { categoryColor, DN_BINS, DRY_COLOR, nodeSvg, PRESSURE_BINS, STATUS_COLOR, STATUS_LABEL, VELOCITY_BINS, type Bin } from './display';
 import { NODE_FIELDS, PIPE_FIELDS } from './labels';
+import { useIsMobile } from './useIsMobile';
+import { SheetHeader } from './MobileNav';
 
 const COLOR_MODES: { id: ColorBy; label: string; help: string }[] = [
   { id: 'statut', label: 'État (résultat du calcul)', help: 'Vert : conforme. Orange : à surveiller (vitesse élevée…). Rouge : problème (pression insuffisante, dépassement PN…). Gris : non alimenté.' },
@@ -22,6 +24,7 @@ export default function MapDisplayPanel() {
   const net = useStore((s) => s.net);
   const st = useStore.getState;
   const up = st().updateSettings;
+  const isMobile = useIsMobile();
 
   const toggleNode = (f: NodeLabelField) =>
     up({ nodeLabels: settings.nodeLabels.includes(f) ? settings.nodeLabels.filter((x) => x !== f) : NODE_FIELDS.map((d) => d.id).filter((id) => id === f || settings.nodeLabels.includes(id)) });
@@ -32,7 +35,7 @@ export default function MapDisplayPanel() {
   const secteurs = useMemo(() => [...new Set(net.nodes.map((n) => n.secteur).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr')), [net.nodes]);
   const mode = COLOR_MODES.find((m) => m.id === colorBy)!;
 
-  if (!settings.legendOpen) {
+  if (!settings.legendOpen && !isMobile) {
     return (
       <button className="map-panel-toggle" onClick={() => up({ legendOpen: true })}>
         🎨 Affichage & légende
@@ -46,12 +49,16 @@ export default function MapDisplayPanel() {
 
   return (
     <div className="map-panel" onWheel={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-      <div className="map-panel-head">
-        <b>Affichage & légende</b>
-        <button className="btn icon small" title="Réduire" onClick={() => up({ legendOpen: false })}>
-          ▴
-        </button>
-      </div>
+      {isMobile ? (
+        <SheetHeader title="Affichage & légende" />
+      ) : (
+        <div className="map-panel-head">
+          <b>Affichage & légende</b>
+          <button className="btn icon small" title="Réduire" onClick={() => up({ legendOpen: false })}>
+            ▴
+          </button>
+        </div>
+      )}
       <div className="map-panel-body">
         {needsCalc && <div className="notice small">Lancez ▶ Calculer pour afficher pressions, vitesses et niveaux d’eau.</div>}
 

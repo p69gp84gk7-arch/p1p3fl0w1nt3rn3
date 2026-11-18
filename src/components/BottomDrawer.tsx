@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { couronneField, effectiveFlow, isConsumer, NODE_LABEL, NODE_TYPES } from '../model/defaults';
 import { nodeMapOf } from '../model/edit';
@@ -53,6 +53,22 @@ export default function BottomDrawer() {
   );
 }
 
+/** Canon (ou regard) dont la pression calculée est sous sa pression mini. */
+export function isUnderPressure(n: NetNode, r: { pression_bar: number } | undefined): boolean {
+  return isConsumer(n.type) && !!r && Number.isFinite(r.pression_bar) && r.pression_bar < n.pression_min_bar;
+}
+
+/** Case à cocher à trois états (tous / aucun / certains). */
+function TriCheckbox({ checked, indeterminate, disabled, onChange, title }: { checked: boolean; indeterminate: boolean; disabled?: boolean; onChange: (v: boolean) => void; title?: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return <input ref={ref} type="checkbox" checked={checked} disabled={disabled} title={title} onChange={(e) => onChange(e.target.checked)} />;
+}
+
+const SANS_PISTE = '(sans piste)';
+
 function GunsTable() {
   const net = useStore((s) => s.net);
   const results = useStore((s) => s.results);
@@ -61,24 +77,110 @@ function GunsTable() {
   const [secteur, setSecteur] = useState('');
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState<'canons' | 'tous' | NodeType>('canons');
-  const secteurs = useMemo(() => [...new Set(net.nodes.map((n) => n.secteur).filter(Boolean))].sort(), [net.nodes]);
+  const [parPiste, setParPiste] = useState(true);
+  const [ouvertes, setOuvertes] = useState<Set<string>>(new Set());
+  const [rougesSeuls, setRougesSeuls] = useState(false);
+  const secteurs = useMemo(() => [...new Set(net.nodes.map((n) => n.secteur).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr')), [net.nodes]);
   const locked = useMemo(() => new Set(net.calques.filter((l) => l.verrouille).map((l) => l.id)), [net.calques]);
-  const rows = net.nodes.filter(
-    (n) =>
-      (typeFilter === 'tous' || (typeFilter === 'canons' ? isConsumer(n.type) : n.type === typeFilter)) &&
-      (!secteur || n.secteur === secteur) &&
-      (!q || `${n.nom} ${n.modele}`.toLowerCase().includes(q.toLowerCase())),
-  );
-  const bulk = (patch: (n: NetNode) => Partial<NetNode>) => {
-    const ids = new Set(rows.filter((r) => !locked.has(r.calque)).map((r) => r.id));
-    st().commit({ ...net, nodes: net.nodes.map((n) => (ids.has(n.id) ? { ...n, ...patch(n) } : n)) });
-  };
+  const rows = net.nodes
+    .filter(
+      (n) =>
+        (typeFilter === 'tous' || (typeFilter === 'canons' ? isConsumer(n.type) : n.type === typeFilter)) &&
+        (!secteur || n.secteur === secteur) &&
+        (!q || `${n.nom} ${n.modele} ${n.secteur}`.toLowerCase().includes(q.toLowerCase())) &&
+        (!rougesSeuls || isUnderPressure(n, results?.nodes[n.id])),
+    )
+    .sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { numeric: true }));
+  const apply = (ids: Set<string>, patch: (n: NetNode) => Partial<NetNode>) =>
+    st().commit({ ...st().net, nodes: st().net.nodes.map((n) => (ids.has(n.id) && !locked.has(n.calque) ? { ...n, ...patch(n) } : n)) });
+  const bulk = (patch: (n: NetNode) => Partial<NetNode>) => apply(new Set(rows.map((r) => r.id)), patch);
+  const setCouronnes = (ids: Set<string>, c: Couronnes) => apply(ids, (n) => (isConsumer(n.type) && (c === '' || n[couronneField(c)] > 0) ? { couronnes: c } : {}));
   const up = (id: string, patch: Partial<NetNode>) => st().updateNode(id, patch);
-  const totalQ = rows.filter((r) => r.actif).reduce((a, n) => a + effectiveFlow(n), 0);
+  const totalQ = rows.filter((r) => r.actif && isConsumer(r.type)).reduce((a, n) => a + effectiveFlow(n), 0);
+  const nRouges = rows.filter((n) => isUnderPressure(n, results?.nodes[n.id])).length;
+
+  const groups = useMemo(() => {
+    const m = new Map<string, NetNode[]>();
+    for (const n of rows) {
+      const k = n.secteur || SANS_PISTE;
+      (m.get(k) ?? m.set(k, []).get(k)!).push(n);
+    }
+    return [...m.entries()].sort((a, b) => (a[0] === SANS_PISTE ? 1 : b[0] === SANS_PISTE ? -1 : a[0].localeCompare(b[0], 'fr')));
+  }, [rows]);
+  const toggleOpen = (k: string) => {
+    const s2 = new Set(ouvertes);
+    if (s2.has(k)) s2.delete(k);
+    else s2.add(k);
+    setOuvertes(s2);
+  };
+  const autoOpen = !!q || !!secteur || rougesSeuls;
+
+  const couronnesSelect = (onPick: (c: Couronnes) => void, label: string) => (
+    <select
+      value="__"
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        if (e.target.value !== '__') onPick(e.target.value as Couronnes);
+      }}
+    >
+      <option value="__" disabled>
+        {label}
+      </option>
+      {COURONNES.map((c) => (
+        <option key={c} value={c}>
+          {c.toUpperCase()}
+        </option>
+      ))}
+      <option value="">Débit manuel</option>
+    </select>
+  );
+
+  const renderRow = (n: NetNode) => {
+    const r = results?.nodes[n.id];
+    const lk = locked.has(n.calque);
+    const low = isUnderPressure(n, r);
+    return (
+      <tr key={n.id} className={`${selection?.id === n.id ? 'selected' : ''} ${low ? 'low-pressure' : ''}`} onClick={() => st().setSelection({ kind: 'node', id: n.id })}>
+        <td onClick={(e) => e.stopPropagation()}>
+          {isConsumer(n.type) && <input type="checkbox" checked={n.actif} disabled={lk} onChange={(e) => up(n.id, { actif: e.target.checked })} />}
+        </td>
+        <td>{n.nom}</td>
+        <td className="muted">{NODE_LABEL[n.type]}</td>
+        {!parPiste && <td>{n.secteur}</td>}
+        <td>{n.modele}</td>
+        <td onClick={(e) => e.stopPropagation()}>
+          {isConsumer(n.type) && (
+            <select value={n.couronnes} disabled={lk} onChange={(e) => up(n.id, { couronnes: e.target.value as Couronnes })}>
+              <option value="">Manuel</option>
+              {COURONNES.map((c) => (
+                <option key={c} value={c} disabled={!(n[couronneField(c)] > 0)}>
+                  {c.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          )}
+        </td>
+        <td className="num">{isConsumer(n.type) ? fmt(effectiveFlow(n), 1) : ''}</td>
+        <td className="num">{fmt(n.altitude_m, 0)}</td>
+        <td className="num">{isConsumer(n.type) ? fmt(n.pression_min_bar, 1) : ''}</td>
+        <td className="num">
+          <b>{r ? fmt(r.pression_bar, 1) : ''}</b>
+        </td>
+        <td className="num">{r?.pression_vanne_bar !== undefined ? fmt(r.pression_vanne_bar, 1) : ''}</td>
+        <td className="num">{r ? fmt(r.vitesse_arrivee_m_s, 2) : ''}</td>
+        <td className="num">{r && r.debit_arrivee_m3h > 0 ? fmt(r.debit_arrivee_m3h, 1) : ''}</td>
+        <td>{r && (low ? <span className="dot-label ko-text">⚠ Pression insuffisante</span> : <Dot statut={r.statut} />)}</td>
+      </tr>
+    );
+  };
+  const nCols = parPiste ? 13 : 14;
 
   return (
     <>
       <div className="table-tools">
+        <label className="check small">
+          <input type="checkbox" checked={parPiste} onChange={(e) => setParPiste(e.target.checked)} /> Grouper par piste
+        </label>
         <select value={secteur} onChange={(e) => setSecteur(e.target.value)}>
           <option value="">Toutes les pistes</option>
           {secteurs.map((s) => (
@@ -96,41 +198,40 @@ function GunsTable() {
         </select>
         <input placeholder="Rechercher…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="muted small">
-          {rows.length} points · {rows.filter((r) => r.actif).length} en production · {fmt(totalQ, 1)} m³/h
+          {rows.length} points · {rows.filter((r) => r.actif && isConsumer(r.type)).length} en production · {fmt(totalQ, 1)} m³/h
         </span>
+        {results && (
+          <label className={`check small ${nRouges ? 'ko-text' : ''}`}>
+            <input type="checkbox" checked={rougesSeuls} onChange={(e) => setRougesSeuls(e.target.checked)} /> {nRouges} sous pression mini
+          </label>
+        )}
         <span className="spacer" />
+        {parPiste && (
+          <>
+            <button className="btn small" onClick={() => setOuvertes(new Set(groups.map(([k]) => k)))}>
+              Tout déplier
+            </button>
+            <button className="btn small" onClick={() => setOuvertes(new Set())}>
+              Tout replier
+            </button>
+          </>
+        )}
         <button className="btn small" onClick={() => bulk((n) => (isConsumer(n.type) ? { actif: true } : {}))}>
           Tout démarrer
         </button>
         <button className="btn small" onClick={() => bulk((n) => (isConsumer(n.type) ? { actif: false } : {}))}>
           Tout arrêter
         </button>
-        <select
-          value=""
-          onChange={(e) => {
-            const c = e.target.value as Couronnes;
-            bulk((n) => (c === '' || n[couronneField(c)] > 0 ? { couronnes: c } : {}));
-          }}
-        >
-          <option value="" disabled>
-            Couronnes pour la liste…
-          </option>
-          {COURONNES.map((c) => (
-            <option key={c} value={c}>
-              {c.toUpperCase()}
-            </option>
-          ))}
-          <option value="">Débit manuel</option>
-        </select>
+        {couronnesSelect((c) => setCouronnes(new Set(rows.map((r) => r.id)), c), 'Couronnes pour la liste…')}
       </div>
       <div className="table-wrap">
-        <table>
+        <table className={parPiste ? 'grouped' : ''}>
           <thead>
             <tr>
               <th>Marche</th>
               <th>Nom</th>
               <th>Type</th>
-              <th>Piste</th>
+              {!parPiste && <th>Piste</th>}
               <th>Modèle</th>
               <th>Couronnes</th>
               <th className="num">Débit m³/h</th>
@@ -143,45 +244,44 @@ function GunsTable() {
               <th>État</th>
             </tr>
           </thead>
-          <tbody>
-            {rows.map((n) => {
-              const r = results?.nodes[n.id];
-              const lk = locked.has(n.calque);
+          {!parPiste ? (
+            <tbody>{rows.map(renderRow)}</tbody>
+          ) : (
+            groups.map(([k, list]) => {
+              const guns = list.filter((n) => isConsumer(n.type));
+              const on = guns.filter((n) => n.actif).length;
+              const q2 = guns.filter((n) => n.actif).reduce((a, n) => a + effectiveFlow(n), 0);
+              const rouges = list.filter((n) => isUnderPressure(n, results?.nodes[n.id])).length;
+              const open = autoOpen || ouvertes.has(k);
+              const ids = new Set(list.map((n) => n.id));
               return (
-                <tr key={n.id} className={selection?.id === n.id ? 'selected' : ''} onClick={() => st().setSelection({ kind: 'node', id: n.id })}>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    {isConsumer(n.type) && <input type="checkbox" checked={n.actif} disabled={lk} onChange={(e) => up(n.id, { actif: e.target.checked })} />}
-                  </td>
-                  <td>{n.nom}</td>
-                  <td className="muted">{NODE_LABEL[n.type]}</td>
-                  <td>{n.secteur}</td>
-                  <td>{n.modele}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    {isConsumer(n.type) && (
-                      <select value={n.couronnes} disabled={lk} onChange={(e) => up(n.id, { couronnes: e.target.value as Couronnes })}>
-                        <option value="">Manuel</option>
-                        {COURONNES.map((c) => (
-                          <option key={c} value={c} disabled={!(n[couronneField(c)] > 0)}>
-                            {c.toUpperCase()}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </td>
-                  <td className="num">{isConsumer(n.type) ? fmt(effectiveFlow(n), 1) : ''}</td>
-                  <td className="num">{fmt(n.altitude_m, 0)}</td>
-                  <td className="num">{isConsumer(n.type) ? fmt(n.pression_min_bar, 1) : ''}</td>
-                  <td className="num">
-                    <b>{r ? fmt(r.pression_bar, 1) : ''}</b>
-                  </td>
-                  <td className="num">{r?.pression_vanne_bar !== undefined ? fmt(r.pression_vanne_bar, 1) : ''}</td>
-                  <td className="num">{r ? fmt(r.vitesse_arrivee_m_s, 2) : ''}</td>
-                  <td className="num">{r && r.debit_arrivee_m3h > 0 ? fmt(r.debit_arrivee_m3h, 1) : ''}</td>
-                  <td>{r && <Dot statut={r.statut} />}</td>
-                </tr>
+                <tbody key={k} className="piste-group">
+                  <tr className={`piste-row ${rouges ? 'has-low' : ''}`} onClick={() => toggleOpen(k)}>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {guns.length > 0 && (
+                        <TriCheckbox
+                          checked={on === guns.length}
+                          indeterminate={on > 0 && on < guns.length}
+                          title={on === guns.length ? 'Arrêter toute la piste' : 'Démarrer toute la piste'}
+                          onChange={(v) => apply(ids, (n) => (isConsumer(n.type) ? { actif: v } : {}))}
+                        />
+                      )}
+                    </td>
+                    <td colSpan={4}>
+                      <span className="chevron">{open ? '▾' : '▸'}</span> <b>{k}</b>{' '}
+                      <span className="muted small">
+                        {guns.length} canon{guns.length > 1 ? 's' : ''} · {on} en marche · {fmt(q2, 1)} m³/h
+                      </span>
+                      {rouges > 0 && <span className="badge-low">⚠ {rouges} sous pression mini</span>}
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>{guns.length > 0 && couronnesSelect((c) => setCouronnes(ids, c), 'Couronnes…')}</td>
+                    <td colSpan={nCols - 6}></td>
+                  </tr>
+                  {open && list.map(renderRow)}
+                </tbody>
               );
-            })}
-          </tbody>
+            })
+          )}
         </table>
       </div>
     </>

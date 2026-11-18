@@ -22,6 +22,7 @@ Application web de **calcul de débit et de pression des réseaux de neige de cu
 - **Pression et vitesse à chaque regard** : pression disponible, vitesse et débit d'arrivée de l'eau, affichés dans la fiche, le tableau des regards et sur la carte.
 - **Calcul hydraulique** : Darcy-Weisbach (Swamee-Jain), méthode du gradient global (EPANET), réseaux ramifiés et maillés, buses Q = k·√P, surpresseurs et réducteurs de pression avec by-pass automatique.
 - **Contrôles** : pression insuffisante aux canons, vitesse excessive, dépassement de PN (y compris aux points bas du tracé), dépression aux points hauts, capacité des pompes. **Pression statique** en un clic.
+- **Pistes** : canons regroupés par piste (menus dépliants dans le tableau, section « Pistes » du panneau) ; une piste entière se démarre, s'arrête ou change de couronnes d'un coup ; les canons sous leur pression mini sont en rouge.
 - **Scénarios** (canons en marche + couronnes), **profil en long** avec ligne piézométrique.
 - **Calques** (« Existant », « Projet 2027 »…) : affichage, inclusion dans le calcul et verrouillage par calque, pour simuler les extensions futures.
 - **Google Sheets** comme base de données (lecture / écriture / résultats) ; export JSON et CSV.

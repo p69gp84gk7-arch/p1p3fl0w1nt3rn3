@@ -1880,3 +1880,27 @@ table.editable input {
     bottom: calc(var(--nav-h) + 16px);
   }
 }
+
+/* ---------- Calage ---------- */
+.calage {
+  border: 1px solid #c8dcf1;
+  background: #f5f9fe;
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.calage summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.calage .field {
+  grid-template-columns: 120px 1fr;
+}
+.calage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}

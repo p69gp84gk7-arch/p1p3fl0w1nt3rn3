@@ -51,6 +51,8 @@ interface State {
   fitToken: number;
   /** Téléphone : panneau ouvert par-dessus la carte. */
   mobileSheet: MobileSheet;
+  /** Mise en pression en cours (id de la station), le réseau se remplit en bleu. */
+  filling: string | null;
 
   /** Applique une modification (avec annulation). */
   commit(next: Network, label?: string): void;
@@ -99,6 +101,7 @@ export const useStore = create<State>((set, get) => ({
   profileTarget: null,
   fitToken: 0,
   mobileSheet: null,
+  filling: null,
 
   commit(next) {
     const { net, past } = get();

@@ -111,6 +111,8 @@ export function nodeIcon(type: NodeType, fill: string, selected: boolean, inacti
 
 /** Couleur des canalisations vides (mode « niveau d'eau »). */
 export const DRY_COLOR = '#c3ccd6';
+/** Couleur de l'eau pendant une mise en pression. */
+export const WATER_COLOR = '#1f78d1';
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);

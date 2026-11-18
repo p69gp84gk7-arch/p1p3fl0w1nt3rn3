@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { pipePath } from '../model/geo';
 import { addNode, connect, nearestPipe, nodeMapOf, reconnect, splitPipe } from '../model/edit';
 import type { GeoPoint, NetNode, Network, Pipe } from '../model/types';
-import { BASE_LAYERS, binColor, categoryColor, DN_BINS, DRY_COLOR, fmt, nodeIcon, PISTES_OVERLAY, pipeWeight, PRESSURE_BINS, STATUS_COLOR, VELOCITY_BINS } from './display';
+import { BASE_LAYERS, binColor, categoryColor, DN_BINS, DRY_COLOR, WATER_COLOR, fmt, nodeIcon, PISTES_OVERLAY, pipeWeight, PRESSURE_BINS, STATUS_COLOR, VELOCITY_BINS } from './display';
 import { nodeBubble, pipeLabel } from './labels';
 import { pipeProfile } from '../hydraulics/solver';
 import { isConsumer } from '../model/defaults';
@@ -81,6 +81,7 @@ function NetworkLayers() {
   const selection = useStore((s) => s.selection);
   const tool = useStore((s) => s.tool);
   const colorBy = useStore((s) => s.colorBy);
+  const filling = useStore((s) => s.filling);
   const settings = useStore((s) => s.settings);
   const activeLayer = useStore((s) => s.activeLayer);
   const drawSpec = useStore((s) => s.drawSpec);
@@ -275,7 +276,7 @@ function NetworkLayers() {
       case 'pression':
         return r ? binColor(PRESSURE_BINS, r.pression_bar) : '#5d6d7e';
       case 'remplissage':
-        return r && r.pression_bar >= 0 ? binColor(PRESSURE_BINS, r.pression_bar) : DRY_COLOR;
+        return r && r.pression_bar >= 0 ? (filling ? WATER_COLOR : binColor(PRESSURE_BINS, r.pression_bar)) : DRY_COLOR;
       case 'diametre':
       case 'vitesse':
         return '#5d6d7e';
@@ -367,7 +368,7 @@ function NetworkLayers() {
             </Polyline>
             {segs?.map((sg, i) =>
               sg.P >= 0 ? (
-                <Polyline key={i} positions={sg.pts} renderer={canvas} interactive={false} pathOptions={{ color: binColor(PRESSURE_BINS, sg.P), weight: w, opacity: 1, lineCap: 'round' }} />
+                <Polyline key={i} positions={sg.pts} renderer={canvas} interactive={false} pathOptions={{ color: filling ? WATER_COLOR : binColor(PRESSURE_BINS, sg.P), weight: w, opacity: 1, lineCap: 'round' }} />
               ) : null,
             )}
           </Fragment>

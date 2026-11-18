@@ -156,6 +156,10 @@ export interface Params {
   pression_max_curseur_bar: number;
   /** Version du réseau de référence intégré dont provient ce réseau ('' sinon). */
   reference_version: string;
+  /** Calage : point de contrôle (id du nœud, '' = le booster). */
+  calage_noeud: string;
+  /** Calage : pression voulue au point de contrôle, réseau chargé et canons fermés (bar). */
+  calage_pression_bar: number;
 }
 
 export interface Network {

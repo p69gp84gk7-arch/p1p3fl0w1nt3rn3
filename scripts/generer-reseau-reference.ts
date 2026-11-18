@@ -9,7 +9,7 @@ import { JSDOM } from 'jsdom';
 (globalThis as unknown as { DOMParser: unknown }).DOMParser = new JSDOM().window.DOMParser;
 
 const { readKmlFile } = await import('../src/import/kmz');
-const { buildReferenceNetwork, REFERENCE_FILES } = await import('../src/data/reference');
+const { buildReferenceNetwork, calibrateReference, REFERENCE_FILES } = await import('../src/data/reference');
 const { fetchElevations } = await import('../src/services/elevation');
 
 const read = (p: string) => new Uint8Array(readFileSync(`public/${p}`)).buffer;
@@ -28,7 +28,10 @@ const r1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
 net.nodes = net.nodes.map((n) => ({ ...n, altitude_m: r1(z[k++]) ?? 0 }));
 net.pipes = net.pipes.map((p) => ({ ...p, geometrie: p.geometrie.map((g) => [g[0], g[1], r1(z[k++])] as typeof g) }));
 const missing = z.filter((v) => v == null).length;
+const calibrated = calibrateReference(net);
+net.nodes = calibrated.nodes;
+net.params = calibrated.params;
 
 writeFileSync('src/data/reseau-reference.json', JSON.stringify(net));
 console.log(`${net.nodes.length} nœuds, ${net.pipes.length} canalisations, ${missing} altitudes manquantes`);
-for (const n of net.nodes.filter((x) => x.type !== 'enneigeur' && x.type !== 'jonction')) console.log(`  ${n.type} ${n.nom} : ${n.altitude_m} m`);
+for (const n of net.nodes.filter((x) => x.type !== 'enneigeur' && x.type !== 'jonction')) console.log(`  ${n.type} ${n.nom} : ${n.altitude_m} m, consigne ${n.pression_consigne_bar} bar`);

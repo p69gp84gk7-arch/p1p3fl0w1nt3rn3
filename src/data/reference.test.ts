@@ -4,7 +4,8 @@ import { readKmlFile } from '../import/kmz';
 import { buildReferenceNetwork, REFERENCE_FILES, REFERENCE_VERSION } from './reference';
 import { referenceNetwork } from './referenceNetwork';
 import { solve } from '../hydraulics/solver';
-import { applyScenario } from '../model/scenario';
+import { applyScenario, staticNetwork } from '../model/scenario';
+import { pressureAt } from '../hydraulics/calage';
 
 const read = (p: string) => new Uint8Array(readFileSync(`public/${p}`)).buffer;
 
@@ -63,5 +64,23 @@ describe('réseau de référence intégré', () => {
     const w60 = wet(60);
     expect(w0).toBeLessThan(w20);
     expect(w20).toBeLessThan(w60);
+  });
+
+  it('calage : 15 bar à l’arrivée du booster canons fermés ; Hount alimenté seulement par le booster', async () => {
+    const ref = await referenceNetwork();
+    const booster = ref.nodes.find((n) => n.type === 'surpresseur')!;
+    const sdm = ref.nodes.find((n) => n.type === 'salle_machines')!;
+    expect(sdm.pression_consigne_bar).toBeGreaterThan(55);
+    expect(pressureAt(staticNetwork(ref), booster.id)).toBeCloseTo(15, 0);
+    const hount = ref.nodes.filter((n) => n.secteur === 'hount estrete');
+    expect(hount.length).toBeGreaterThan(10);
+    const on = solve(staticNetwork(ref));
+    expect(hount.every((n) => on.nodes[n.id].pression_bar > 0)).toBe(true);
+    const off = solve(staticNetwork({ ...ref, nodes: ref.nodes.map((n) => (n.id === booster.id ? { ...n, en_marche: false } : n)) }));
+    expect(hount.every((n) => off.nodes[n.id].statut === 'isole')).toBe(true);
+    // usine trop basse : booster désamorcé, Hount vide
+    const low = solve(staticNetwork({ ...ref, nodes: ref.nodes.map((n) => (n.id === sdm.id ? { ...n, pression_consigne_bar: 40 } : n)) }));
+    expect(low.nodes[booster.id].messages.join(' ')).toMatch(/désamorcé/);
+    expect(hount.every((n) => low.nodes[n.id].statut === 'isole')).toBe(true);
   });
 });

@@ -66,7 +66,7 @@ export function pipeLength(p: Pipe, nodes: Map<string, NetNode>): number {
   return L > 0 ? L : Math.max(p.longueur_m, 0.1);
 }
 
-function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>): SolveResult {
+function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>, blocked: Set<string> = new Set()): SolveResult {
   const maxIt = opts.maxIterations ?? 200;
   const accuracy = opts.accuracy ?? 1e-6;
   const T = net.params.temperature_eau_c ?? 2;
@@ -90,7 +90,8 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
 
   // ---- Calques exclus du calcul ----
   const excludedLayers = new Set((net.calques ?? []).filter((l) => !l.calcul).map((l) => l.id));
-  const closedValves = new Set(net.nodes.filter((n) => n.type === 'vanne' && !n.actif).map((n) => n.id));
+  // Vannes fermées et surpresseurs bloqués (arrêtés / désamorcés, sans by-pass) : l'eau ne passe pas.
+  const closedValves = new Set([...net.nodes.filter((n) => n.type === 'vanne' && !n.actif).map((n) => n.id), ...blocked]);
   const calcNodes = net.nodes.filter((n) => !excludedLayers.has(n.calque) && !closedValves.has(n.id));
   const nodeMap = new Map(calcNodes.map((n) => [n.id, n]));
   const allNodeIds = new Set(net.nodes.map((n) => n.id));
@@ -377,7 +378,7 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
     const msgs: string[] = [];
     const isGun = isConsumer(n.type) && n.actif;
     if (closedValves.has(n.id) && !excludedLayers.has(n.calque)) {
-      result.nodes[n.id] = { id: n.id, charge_m: NaN, pression_bar: NaN, debit_m3h: 0, statut: 'ok', messages: ['Vanne fermée.'], vitesse_arrivee_m_s: NaN, debit_arrivee_m3h: 0 };
+      result.nodes[n.id] = { id: n.id, charge_m: NaN, pression_bar: NaN, debit_m3h: 0, statut: 'ok', messages: n.type === 'vanne' ? ['Vanne fermée.'] : [], vitesse_arrivee_m_s: NaN, debit_arrivee_m3h: 0 };
       continue;
     }
     if (excludedLayers.has(n.calque)) {
@@ -521,37 +522,125 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
 }
 
 /**
- * Calcul hydraulique complet. Les régulateurs (surpresseurs, réducteurs de
- * pression) sont d'abord supposés actifs (pression de sortie = consigne) ;
- * ceux dont l'état est incohérent sont ensuite basculés en « by-pass »
- * (simple passage), comme le fait EPANET, jusqu'à stabilisation.
+ * Canalisation par laquelle l'eau arrive à chaque surpresseur / réducteur :
+ * celle choisie par l'utilisateur, sinon la première atteinte en partant des
+ * salles des machines en marche.
+ */
+export function regulatorInlets(net: Network): Map<string, string> {
+  const excluded = new Set((net.calques ?? []).filter((l) => !l.calcul).map((l) => l.id));
+  const ok = new Set(net.nodes.filter((n) => !excluded.has(n.calque) && !(n.type === 'vanne' && !n.actif)).map((n) => n.id));
+  const adj = new Map<string, { pipe: Pipe; other: string }[]>();
+  for (const p of net.pipes) {
+    if (p.statut === 'fermee' || excluded.has(p.calque) || !ok.has(p.amont) || !ok.has(p.aval)) continue;
+    (adj.get(p.amont) ?? adj.set(p.amont, []).get(p.amont)!).push({ pipe: p, other: p.aval });
+    (adj.get(p.aval) ?? adj.set(p.aval, []).get(p.aval)!).push({ pipe: p, other: p.amont });
+  }
+  const out = new Map<string, string>();
+  const regs = net.nodes.filter((n) => isRegulator(n.type));
+  for (const r of regs) if (r.aspiration && (adj.get(r.id) ?? []).some((e) => e.pipe.id === r.aspiration)) out.set(r.id, r.aspiration);
+  const regIds = new Set(regs.map((r) => r.id));
+  const queue = net.nodes.filter((n) => n.type === 'salle_machines' && n.en_marche !== false && ok.has(n.id)).map((n) => n.id);
+  const seen = new Set(queue);
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const { pipe, other } of adj.get(id) ?? []) {
+      if (seen.has(other)) continue;
+      seen.add(other);
+      queue.push(other);
+      if (regIds.has(other) && !out.has(other)) out.set(other, pipe.id);
+    }
+  }
+  return out;
+}
+
+type BoosterState = 'actif' | 'bypass' | 'bloque';
+
+/**
+ * Calcul hydraulique complet. Les régulateurs sont d'abord supposés actifs
+ * (pression de sortie = consigne), puis leur état est ajusté jusqu'à
+ * stabilisation, comme le fait EPANET :
+ *  • surpresseur : actif ; en by-pass si la pression d'arrivée dépasse déjà
+ *    la consigne ; bloqué (aucun passage d'eau, la ligne en aval n'est pas
+ *    alimentée) s'il est à l'arrêt ou désamorcé (pression d'arrivée < 0) ;
+ *  • réducteur : actif, ou grand ouvert si l'amont est sous la consigne.
  */
 export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
-  const regulators = net.nodes.filter((n) => isRegulator(n.type) && n.en_marche !== false);
-  let pass = new Set<string>();
-  let r = solveOnce(net, opts, pass);
+  const barPerM = (waterDensity(net.params.temperature_eau_c ?? 2) * G) / 1e5;
+  const boosters = net.nodes.filter((n) => n.type === 'surpresseur');
+  const reducers = net.nodes.filter((n) => n.type === 'reducteur' && n.en_marche !== false);
+  const inlets = regulatorInlets(net);
+  const state = new Map<string, BoosterState>(boosters.map((b) => [b.id, b.en_marche === false ? 'bloque' : 'actif']));
+  const reopened = new Map<string, number>();
+  const forced = new Set<string>(); // désamorcé sous débit (oscillation actif ↔ bloqué)
+  let reducerPass = new Set<string>();
+  const sets = () => {
+    const pass = new Set(reducerPass);
+    const blocked = new Set<string>();
+    for (const [id, s] of state) {
+      if (s === 'bypass') pass.add(id);
+      if (s === 'bloque') blocked.add(id);
+    }
+    return { pass, blocked };
+  };
+  /** Pression d'arrivée d'un surpresseur bloqué (débit nul dans la canalisation d'arrivée). */
+  const inletPressure = (b: NetNode, r: SolveResult): number => {
+    const pid = inlets.get(b.id);
+    const p = pid ? net.pipes.find((x) => x.id === pid) : undefined;
+    if (!p) return -Infinity;
+    const other = r.nodes[p.amont === b.id ? p.aval : p.amont];
+    return other && Number.isFinite(other.charge_m) ? (other.charge_m - b.altitude_m) * barPerM : -Infinity;
+  };
+
+  let { pass, blocked } = sets();
+  let r = solveOnce(net, opts, pass, blocked);
   const tol = 0.01; // bar
-  for (let round = 0; round < 8 && regulators.length; round++) {
-    const next = new Set(pass);
-    for (const n of regulators) {
+  for (let round = 0; round < 12 && (boosters.length || reducers.length); round++) {
+    let changed = false;
+    for (const b of boosters) {
+      if (b.en_marche === false || forced.has(b.id)) continue;
+      const s = state.get(b.id)!;
+      const res = r.nodes[b.id];
+      const set = b.pression_consigne_bar;
+      let next: BoosterState = s;
+      if (s === 'actif') {
+        const Pin = res?.pression_aspiration_bar;
+        if (Pin === undefined || !Number.isFinite(Pin)) next = Number.isFinite(res?.pression_bar) ? s : 'bloque';
+        else if (Pin < 0) next = 'bloque';
+        else if (Pin > set + tol) next = 'bypass';
+      } else if (s === 'bypass') {
+        const P = res?.pression_bar ?? NaN;
+        if (!(P >= 0)) next = 'bloque';
+        else if (P < set - tol) next = 'actif';
+      } else if (inletPressure(b, r) >= 0) {
+        const k = (reopened.get(b.id) ?? 0) + 1;
+        reopened.set(b.id, k);
+        if (k > 2) forced.add(b.id);
+        else next = 'actif';
+      }
+      if (next !== s) {
+        state.set(b.id, next);
+        changed = true;
+      }
+    }
+    const nextRed = new Set(reducerPass);
+    for (const n of reducers) {
       const res = r.nodes[n.id];
       if (!res || !Number.isFinite(res.pression_bar)) continue;
       const set = n.pression_consigne_bar;
-      if (!pass.has(n.id)) {
+      if (!reducerPass.has(n.id)) {
         const Pin = res.pression_aspiration_bar;
-        if (Pin === undefined) continue;
-        if (n.type === 'surpresseur' && (Pin > set + tol || Pin < 0)) next.add(n.id);
-        if (n.type === 'reducteur' && Pin < set - tol) next.add(n.id);
-      } else {
-        // Un surpresseur ne repart que si l'eau lui arrive (pression ≥ 0).
-        if (n.type === 'surpresseur' && res.pression_bar >= 0 && res.pression_bar < set - tol) next.delete(n.id);
-        if (n.type === 'reducteur' && res.pression_bar > set + tol) next.delete(n.id);
-      }
+        if (Pin !== undefined && Pin < set - tol) nextRed.add(n.id);
+      } else if (res.pression_bar > set + tol) nextRed.delete(n.id);
     }
-    if (next.size === pass.size && [...next].every((x) => pass.has(x))) break;
-    pass = next;
-    r = solveOnce(net, opts, pass);
+    if (nextRed.size !== reducerPass.size || [...nextRed].some((x) => !reducerPass.has(x))) {
+      reducerPass = nextRed;
+      changed = true;
+    }
+    if (!changed) break;
+    ({ pass, blocked } = sets());
+    r = solveOnce(net, opts, pass, blocked);
   }
+
   // Vitesse et débit d'arrivée à chaque nœud (canalisations qui l'alimentent).
   for (const p of net.pipes) {
     const pr = r.pipes[p.id];
@@ -565,23 +654,36 @@ export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
     const nr = r.nodes[n.id];
     if (nr && !Number.isFinite(nr.vitesse_arrivee_m_s) && Number.isFinite(nr.pression_bar)) nr.vitesse_arrivee_m_s = 0;
   }
-  for (const id of pass) {
-    const n = regulators.find((x) => x.id === id)!;
-    const res = r.nodes[id];
+
+  // Messages d'état des surpresseurs et réducteurs.
+  for (const b of boosters) {
+    const res = r.nodes[b.id];
     if (!res) continue;
-    res.messages.push(
-      n.type === 'surpresseur'
-        ? res.pression_bar < 0 || !Number.isFinite(res.pression_bar)
-          ? "Surpresseur désamorcé : l'eau n'arrive pas jusqu'à lui (augmentez la pression en amont)."
-          : "Surpresseur à l'arrêt : la pression d'arrivée dépasse déjà la consigne (by-pass)."
-        : "Réducteur grand ouvert : la pression d'arrivée est inférieure à la consigne.",
-    );
-    if (n.type === 'surpresseur' && (res.pression_bar < 0 || !Number.isFinite(res.pression_bar))) res.statut = 'alerte';
+    const s = state.get(b.id)!;
+    if (s === 'bloque') {
+      const Pin = inletPressure(b, r);
+      if (Number.isFinite(Pin)) res.pression_aspiration_bar = Pin;
+      if (b.en_marche === false) {
+        res.statut = 'isole';
+        res.messages.push('Booster à l’arrêt : il ne laisse pas passer l’eau, la ligne en aval n’est pas alimentée.');
+      } else if (forced.has(b.id)) {
+        res.statut = 'erreur';
+        res.messages.push('Booster désamorcé en production : avec ce débit, la pression d’arrivée devient négative. Réduisez le débit ou augmentez la pression de l’usine.');
+      } else {
+        res.statut = 'alerte';
+        res.messages.push(
+          `Booster désamorcé : l’eau n’arrive pas jusqu’à lui${Number.isFinite(Pin) ? ` (pression d’arrivée ${Pin.toFixed(1).replace('.', ',')} bar)` : ''}. Augmentez la pression de l’usine.`,
+        );
+      }
+    } else if (s === 'bypass') {
+      res.messages.push('Booster en by-pass : la pression d’arrivée dépasse déjà la consigne.');
+    }
   }
   for (const n of net.nodes) {
-    if (isRegulator(n.type) && n.en_marche === false && r.nodes[n.id]) {
-      r.nodes[n.id].messages.push(n.type === 'surpresseur' ? 'Surpresseur à l’arrêt : l’eau le traverse sans surpression (by-pass).' : 'Réducteur hors service (grand ouvert).');
-    }
+    const res = r.nodes[n.id];
+    if (!res || n.type !== 'reducteur') continue;
+    if (n.en_marche === false) res.messages.push('Réducteur hors service (grand ouvert).');
+    else if (reducerPass.has(n.id)) res.messages.push('Réducteur grand ouvert : la pression d’arrivée est inférieure à la consigne.');
   }
   return r;
 }

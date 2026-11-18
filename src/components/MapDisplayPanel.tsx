@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useStore, type ColorBy } from '../store';
 import { NODE_LABEL, NODE_TYPES } from '../model/defaults';
 import type { NodeLabelField, PipeLabelField } from '../services/storage';
-import { categoryColor, DN_BINS, DRY_COLOR, nodeSvg, PRESSURE_BINS, STATUS_COLOR, STATUS_LABEL, VELOCITY_BINS, type Bin } from './display';
+import { categoryColor, DN_BINS, DRY_COLOR, WATER_COLOR, nodeSvg, PRESSURE_BINS, STATUS_COLOR, STATUS_LABEL, VELOCITY_BINS, type Bin } from './display';
 import { NODE_FIELDS, PIPE_FIELDS } from './labels';
 import { useIsMobile } from './useIsMobile';
 import { SheetHeader } from './MobileNav';
@@ -20,6 +20,7 @@ const COLOR_MODES: { id: ColorBy; label: string; help: string }[] = [
 export default function MapDisplayPanel() {
   const settings = useStore((s) => s.settings);
   const colorBy = useStore((s) => s.colorBy);
+  const filling = useStore((s) => s.filling);
   const results = useStore((s) => s.results);
   const net = useStore((s) => s.net);
   const st = useStore.getState;
@@ -80,9 +81,14 @@ export default function MapDisplayPanel() {
             ))}
           </ul>
         )}
-        {(colorBy === 'pression' || colorBy === 'remplissage') && <BinsLegend bins={PRESSURE_BINS} />}
+        {(colorBy === 'pression' || (colorBy === 'remplissage' && !filling)) && <BinsLegend bins={PRESSURE_BINS} />}
         {colorBy === 'remplissage' && (
           <ul className="legend">
+            {filling && (
+              <li>
+                <i style={{ background: WATER_COLOR }} /> Rempli d’eau (mise en pression en cours — le dégradé de pression s’affiche à la fin)
+              </li>
+            )}
             <li>
               <i style={{ background: DRY_COLOR }} /> Vide (au-dessus du niveau d’eau)
             </li>

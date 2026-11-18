@@ -13,6 +13,8 @@ export const DEFAULT_PARAMS: Params = {
   pression_min_bp_bar: 8,
   pression_max_curseur_bar: 80,
   reference_version: '',
+  calage_noeud: '',
+  calage_pression_bar: 15,
 };
 
 export const DEFAULT_CATALOGUE: PipeSpec[] = [

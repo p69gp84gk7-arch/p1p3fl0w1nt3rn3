@@ -14,8 +14,10 @@ export const REFERENCE_FILES = {
 };
 
 export const REFERENCE_NAME = 'Réseau neige – référence';
+/** Modèles de la station qui sont des perches (les autres sont des ventilateurs). */
+export const PERCHES = ['safyr', 'saphir', 'borax', 'rubis', 'revo', 'v3', 'street', 'taurus', 'tl4', 'tl6'];
 /** À incrémenter à chaque évolution du réseau de référence. */
-export const REFERENCE_VERSION = '2026-11-19.2';
+export const REFERENCE_VERSION = '2026-11-19.3';
 
 /** Construit le réseau à partir des fichiers (sans les altitudes). */
 export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Network {
@@ -50,12 +52,18 @@ export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Netw
     return n;
   });
   // Pressions mini : rubis 18 bar, canons BP 8 bar, autres modèles 12 bar.
-  // Rubis et Revo : 18 bar mini, vanne régulée à 45 bar.
-  const regulated = (m: string) => ['rubis', 'revo'].includes(m.toLowerCase());
-  out.modeles = out.modeles.map((m) => (regulated(m.modele) ? { ...m, pression_min_bar: 18, pression_regulation_bar: 45 } : m));
-  out.modeles = out.modeles.map((m) =>
-    DEFAULT_MODELES.some((d) => d.modele === m.modele) || regulated(m.modele) ? m : { ...m, pression_min_bar: out.params.pression_min_defaut_bar },
-  );
+  // Types et pressions mini des modèles de la station :
+  //  • perches : safyr, borax, rubis, revo, v3, street, taurus, tl4, tl6 ; les autres sont des ventilateurs ;
+  //  • Rubis et Revo : 18 bar mini, vanne régulée à 45 bar ; Borax : 6 bar ; ventilateurs : 8 bar ;
+  //  • autres perches : pression mini par défaut.
+  out.modeles = out.modeles.map((m) => {
+    if (DEFAULT_MODELES.some((d) => d.modele === m.modele)) return m.type === 'ventilateur' ? { ...m, pression_min_bar: 8 } : m;
+    const k = m.modele.toLowerCase();
+    const type = PERCHES.includes(k) ? 'perche' : 'ventilateur';
+    const regule = k === 'rubis' || k === 'revo';
+    const pmin = regule ? 18 : k === 'borax' ? 6 : type === 'ventilateur' ? 8 : out.params.pression_min_defaut_bar;
+    return { ...m, type, pression_min_bar: pmin, pression_regulation_bar: regule ? 45 : 0 };
+  });
   // Abris de sectionnement : vannes (ouvertes), pas des canons.
   out.nodes = out.nodes.map((n) => (/sectionnement/i.test(n.notes) && n.type === 'enneigeur' ? { ...n, type: 'vanne' as const, actif: true, modele: '', debit_m3h: 0 } : n));
   out = applyMinPressures(out);

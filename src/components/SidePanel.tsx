@@ -4,7 +4,7 @@ import { couronneField, effectiveFlow, isBP, isConsumer, isRegulator, LAYER_COLO
 import { deleteNode, deletePipe, mergeAtNode, nodeMapOf, orientByFlow, reversePipe } from '../model/edit';
 import { pipeLength } from '../hydraulics/solver';
 import { COURONNES, type Couronnes, type Layer, type NetNode, type NodeType, type Pipe } from '../model/types';
-import { NumField, Row, Section, TextField, Toggle } from './fields';
+import { ChoiceField, NumField, Row, Section, TextField, Toggle } from './fields';
 import { BASE_LAYERS, fmt, STATUS_COLOR, STATUS_LABEL } from './display';
 import { newId } from '../model/ids';
 import { SheetHeader } from './MobileNav';
@@ -146,7 +146,14 @@ function NodeEditor({ node }: { node: NetNode }) {
           <LayerSelect value={node.calque} onChange={(v) => up({ calque: v })} disabled={locked} />
         </Row>
         <Row label="Piste / secteur">
-          <TextField value={node.secteur} onChange={(v) => up({ secteur: v })} disabled={locked} />
+          <ChoiceField
+            value={node.secteur}
+            options={[...new Set(net.nodes.map((n) => n.secteur))].sort((a, b) => a.localeCompare(b, 'fr'))}
+            emptyLabel="(aucune)"
+            allowNew="Nom de la nouvelle piste :"
+            onChange={(v) => up({ secteur: v })}
+            disabled={locked}
+          />
         </Row>
         <Row label="Altitude" hint="Récupérée automatiquement depuis la position GPS (IGN RGE ALTI®)">
           <NumField value={node.altitude_m} unit="m" digits={1} onChange={(v) => up({ altitude_m: v })} disabled={locked} />
@@ -167,13 +174,20 @@ function NodeEditor({ node }: { node: NetNode }) {
           <Row label="Modèle">
             <select value={node.modele} onChange={(e) => applyModel(e.target.value)} disabled={locked}>
               <option value="">—</option>
-              {net.modeles.map((m) => (
-                <option key={m.modele} value={m.modele}>
-                  {m.modele}
-                </option>
+              {(['perche', 'ventilateur'] as const).map((t) => (
+                <optgroup key={t} label={t === 'perche' ? 'Perches' : 'Ventilateurs'}>
+                  {net.modeles
+                    .filter((m) => (m.type === t) || (t === 'ventilateur' && m.type !== 'perche'))
+                    .map((m) => (
+                      <option key={m.modele} value={m.modele}>
+                        {m.modele} ({fmt(m.pression_min_bar, 0)} bar mini)
+                      </option>
+                    ))}
+                </optgroup>
               ))}
               {node.modele && !model && <option value={node.modele}>{node.modele}</option>}
             </select>
+            {model?.type && <span className="muted small">{model.type}</span>}
           </Row>
           <Row label="Couronnes">
             <div className="segmented">
@@ -230,7 +244,15 @@ function NodeEditor({ node }: { node: NetNode }) {
             <NumField value={node.air} digits={1} onChange={(v) => up({ air: v })} disabled={locked} />
           </Row>
           <Row label="Priorité">
-            <TextField value={node.priorite} onChange={(v) => up({ priorite: v })} disabled={locked} />
+            <ChoiceField
+              value={node.priorite}
+              options={[...new Set(['1', '2', '3', 'BP', ...net.nodes.map((n) => n.priorite)])]}
+              labels={{ BP: 'BP (basse pression)' }}
+              emptyLabel="(aucune)"
+              allowNew="Priorité :"
+              onChange={(v) => up({ priorite: v, pression_min_bar: minPressureFor({ ...node, priorite: v }, net) })}
+              disabled={locked}
+            />
           </Row>
         </Section>
       )}
@@ -462,7 +484,13 @@ function PipeEditor({ pipe }: { pipe: Pipe }) {
           <NumField value={pipe.diametre_int_mm} unit="mm" digits={1} onChange={(v) => up({ diametre_int_mm: v })} disabled={locked} />
         </Row>
         <Row label="Matériau">
-          <TextField value={pipe.materiau} onChange={(v) => up({ materiau: v })} disabled={locked} />
+          <ChoiceField
+            value={pipe.materiau}
+            options={[...new Set([...net.catalogue.map((c) => c.materiau), ...net.pipes.map((p) => p.materiau)])]}
+            allowNew="Matériau :"
+            onChange={(v) => up({ materiau: v })}
+            disabled={locked}
+          />
         </Row>
         <Row label="Rugosité">
           <NumField value={pipe.rugosite_mm} unit="mm" digits={3} onChange={(v) => up({ rugosite_mm: v })} disabled={locked} />

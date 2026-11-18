@@ -94,3 +94,51 @@ export function Section({ title, children, actions }: { title: string; children:
     </section>
   );
 }
+
+/**
+ * Liste déroulante des valeurs possibles, avec « Autre… » pour en saisir une
+ * nouvelle quand `allowNew` est fourni (libellé de la question).
+ */
+export function ChoiceField({
+  value,
+  options,
+  onChange,
+  disabled,
+  allowNew,
+  emptyLabel,
+  labels,
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  allowNew?: string;
+  /** Libellé de la valeur vide (absente si non fourni). */
+  emptyLabel?: string;
+  /** Libellés affichés pour certaines valeurs. */
+  labels?: Record<string, string>;
+}) {
+  const list = [...new Set([...options.filter(Boolean), ...(value ? [value] : [])])];
+  return (
+    <select
+      value={value}
+      disabled={disabled}
+      onChange={(e) => {
+        if (e.target.value === '__new__') {
+          const v = prompt(allowNew ?? 'Nouvelle valeur :');
+          if (v && v.trim()) onChange(v.trim());
+          return;
+        }
+        onChange(e.target.value);
+      }}
+    >
+      {emptyLabel !== undefined && <option value="">{emptyLabel}</option>}
+      {list.map((o) => (
+        <option key={o} value={o}>
+          {labels?.[o] ?? o}
+        </option>
+      ))}
+      {allowNew && <option value="__new__">➕ Autre…</option>}
+    </select>
+  );
+}

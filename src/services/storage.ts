@@ -5,6 +5,11 @@ import type { ElevationSource } from './elevation';
 const NET_KEY = 'pipeflow-neige:reseau';
 const SETTINGS_KEY = 'pipeflow-neige:reglages';
 
+/** Informations affichables dans la bulle d'un point. */
+export type NodeLabelField = 'nom' | 'altitude' | 'pression' | 'marge' | 'pression_min' | 'vitesse' | 'debit' | 'charge' | 'modele' | 'couronnes' | 'secteur';
+/** Informations affichables sur une canalisation. */
+export type PipeLabelField = 'vitesse' | 'debit' | 'dn' | 'perte' | 'pression' | 'nom';
+
 export interface Settings {
   /** URL de l'application Web Apps Script liée à la base Google Sheets. */
   sheetsUrl: string;
@@ -16,6 +21,18 @@ export interface Settings {
   showPistes: boolean;
   /** Lien du classeur Google Sheets (pour l'ouvrir depuis l'application). */
   sheetLink: string;
+  /** Contenu des bulles des points. */
+  nodeLabels: NodeLabelField[];
+  /** Types de points qui portent une bulle. */
+  labelGuns: boolean;
+  labelOthers: boolean;
+  labelJunctions: boolean;
+  /** Afficher les bulles même en vue éloignée. */
+  labelsAlways: boolean;
+  /** Étiquettes des canalisations. */
+  pipeLabels: PipeLabelField[];
+  /** Panneau « Affichage & légende » déplié. */
+  legendOpen: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,6 +42,13 @@ export const DEFAULT_SETTINGS: Settings = {
   baseLayer: 'ign-plan',
   showPistes: false,
   sheetLink: '',
+  nodeLabels: ['nom', 'pression'],
+  labelGuns: true,
+  labelOthers: true,
+  labelJunctions: false,
+  labelsAlways: false,
+  pipeLabels: ['vitesse'],
+  legendOpen: true,
 };
 
 function safeGet(key: string): string | null {

@@ -92,35 +92,34 @@ export function nodeSvg(type: NodeType, fill: string, size = 18, inactive = fals
 }
 
 const iconCache = new Map<string, L.DivIcon>();
-/** Petite étiquette « 23,4 bar · 1,8 m/s » affichée à côté d'un nœud. */
-export function resultLabel(pression: number, vitesse: number | undefined): string | undefined {
-  if (!Number.isFinite(pression)) return undefined;
-  const v = vitesse !== undefined && Number.isFinite(vitesse) && vitesse > 0 ? ` <span class="v">${fmt(vitesse, 1)} m/s</span>` : '';
-  return `${fmt(pression, 1)} bar${v}`;
-}
-export function nodeIcon(type: NodeType, fill: string, selected: boolean, inactive: boolean, label?: string, result?: string): L.DivIcon {
-  const key = `${type}|${fill}|${selected}|${inactive}|${label ?? ''}|${result ?? ''}`;
+export function nodeIcon(type: NodeType, fill: string, selected: boolean, inactive: boolean, bubble?: string): L.DivIcon {
+  const key = `${type}|${fill}|${selected}|${inactive}|${bubble ?? ''}`;
   let icon = iconCache.get(key);
   if (!icon) {
-    const size = type === 'jonction' ? 18 : 18;
     const box = type === 'salle_machines' ? 26 : type === 'surpresseur' ? 22 : 18;
     icon = L.divIcon({
       className: `node-icon${selected ? ' is-selected' : ''}`,
-      html: `${nodeSvg(type, fill, size, inactive)}${label ? `<span class="node-label">${escapeHtml(label)}</span>` : ''}${result ? `<span class="node-result">${result}</span>` : ''}`,
+      html: `${nodeSvg(type, fill, 18, inactive)}${bubble ? `<span class="bubble">${bubble}</span>` : ''}`,
       iconSize: [box, box],
       iconAnchor: [box / 2, box / 2],
     });
+    if (iconCache.size > 5000) iconCache.clear();
     iconCache.set(key, icon);
   }
   return icon;
 }
+
+/** Couleur des canalisations vides (mode « niveau d'eau »). */
+export const DRY_COLOR = '#c3ccd6';
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
 export const fmt = (v: number | undefined, d = 1) =>
-  v === undefined || !Number.isFinite(v) ? '—' : v.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
+  v === undefined || !Number.isFinite(v)
+    ? '—'
+    : (Math.abs(v) < 0.5 * 10 ** -d ? 0 : v).toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
 
 export const BASE_LAYERS = [
   {

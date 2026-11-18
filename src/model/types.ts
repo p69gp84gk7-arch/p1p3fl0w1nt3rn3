@@ -61,6 +61,8 @@ export interface NetNode {
   /** Débit d'air (information). */
   air: number;
   priorite: string;
+  /** Salle des machines / surpresseur / réducteur : en service (sinon arrêt / by-pass). */
+  en_marche: boolean;
 }
 
 export type PipeStatus = 'ouverte' | 'fermee';
@@ -148,6 +150,12 @@ export interface Params {
   pression_min_defaut_bar: number;
   tolerance_accrochage_m: number;
   scenario_actif: string;
+  /** Pression minimale des canons marqués « BP » (basse pression), bar. */
+  pression_min_bp_bar: number;
+  /** Borne haute du curseur de pression des salles des machines, bar. */
+  pression_max_curseur_bar: number;
+  /** Version du réseau de référence intégré dont provient ce réseau ('' sinon). */
+  reference_version: string;
 }
 
 export interface Network {

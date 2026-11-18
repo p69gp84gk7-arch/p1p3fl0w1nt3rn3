@@ -3,7 +3,7 @@
 
 import { buildNetwork, defaultImportChoices, mergeKml, withPointOverrides, type KmlContent } from '../import/kmz';
 import { applyFlowTable, readFlowTable } from '../import/csv';
-import { DEFAULT_MODELES, emptyNetwork } from '../model/defaults';
+import { applyMinPressures, DEFAULT_MODELES, emptyNetwork } from '../model/defaults';
 import type { Network } from '../model/types';
 
 export const REFERENCE_FILES = {
@@ -12,12 +12,15 @@ export const REFERENCE_FILES = {
 };
 
 export const REFERENCE_NAME = 'Réseau neige – référence';
+/** À incrémenter à chaque évolution du réseau de référence. */
+export const REFERENCE_VERSION = '2026-11-18.2';
 
 /** Construit le réseau à partir des fichiers (sans les altitudes). */
 export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Network {
   const kml = mergeKml(kmls);
   const net = emptyNetwork();
   net.params.nom_projet = REFERENCE_NAME;
+  net.params.reference_version = REFERENCE_VERSION;
   const d = defaultImportChoices(kml);
   const { kml: kml2, categoryTypes, categoryModels } = withPointOverrides(kml, d.catTypes, d.catModels, d.pointTypes);
   const res = buildNetwork(kml2, {
@@ -44,6 +47,17 @@ export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Netw
     if (n.type === 'surpresseur') return { ...n, notes: n.notes || 'Pression de refoulement et débit maximal à renseigner.' };
     return n;
   });
+  // Pressions mini : rubis 18 bar, canons BP 8 bar, autres modèles 12 bar.
+  out.modeles = out.modeles.map((m) => ({ ...m, pression_min_bar: m.modele.toLowerCase() === 'rubis' ? 18 : m.pression_min_bar }));
+  out.modeles = out.modeles.map((m) =>
+    DEFAULT_MODELES.some((d) => d.modele === m.modele) || m.modele.toLowerCase() === 'rubis' ? m : { ...m, pression_min_bar: out.params.pression_min_defaut_bar },
+  );
+  // Abris de sectionnement : vannes (ouvertes), pas des canons.
+  out.nodes = out.nodes.map((n) => (/sectionnement/i.test(n.notes) && n.type === 'enneigeur' ? { ...n, type: 'vanne' as const, actif: true, modele: '', debit_m3h: 0 } : n));
+  out = applyMinPressures(out);
+  // Pompage en service par défaut.
+  out.nodes = out.nodes.map((n) => (n.type === 'salle_machines' || n.type === 'surpresseur' ? { ...n, en_marche: true } : n));
+
   // État initial : canons à l'arrêt ; un scénario par piste (C1+C2+C3) et un
   // scénario « toutes pistes » en C1.
   out.nodes = out.nodes.map((n) => (n.type === 'enneigeur' || n.type === 'regard' ? { ...n, actif: false } : n));

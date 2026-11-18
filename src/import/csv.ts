@@ -123,18 +123,30 @@ export function applyFlowTable(
   const byName = new Map<string, FlowRow>();
   for (const r of rows) byName.set(norm(r.nom), r);
   const used = new Set<string>();
+  // Correspondance de secours par numéro seul (« BP179 » ↔ « 179 »), si non ambiguë.
+  const exact = new Set(net.nodes.map((n) => norm(n.nom)));
+  const digitsOf = (s: string) => /^[a-z]*(\d+[a-z]?)$/.exec(norm(s))?.[1];
+  const lookup = (nom: string): { row: FlowRow; key: string } | undefined => {
+    const k = norm(nom);
+    const r = byName.get(k);
+    if (r) return { row: r, key: k };
+    const d = digitsOf(nom);
+    if (d && d !== k && !exact.has(d) && byName.has(d)) return { row: byName.get(d)!, key: d };
+    return undefined;
+  };
   const modeles = [...net.modeles];
   const nouveauxModeles: string[] = [];
   const nodes = net.nodes.map((n) => {
     if (n.type !== 'enneigeur' && n.type !== 'regard') return n;
-    const r = byName.get(norm(n.nom));
-    if (!r) return n;
-    used.add(norm(n.nom));
+    const hit = lookup(n.nom);
+    if (!hit) return n;
+    const r = hit.row;
+    used.add(hit.key);
     const modele = cleanModel(r.modele) || n.modele;
     const count = Number(/^(\d+)\s*[a-z]/i.exec(r.modele.trim())?.[1] ?? 1);
     if (modele && !modeles.some((m) => m.modele.toLowerCase() === modele.toLowerCase())) {
       const base = DEFAULT_MODELES[2];
-      modeles.push({ ...base, modele, type: '', debit_nominal_m3h: r.c1c2c3 || r.debit || base.debit_nominal_m3h });
+      modeles.push({ ...base, modele, type: '', debit_nominal_m3h: r.c1c2c3 || r.debit || base.debit_nominal_m3h, pression_min_bar: net.params.pression_min_defaut_bar });
       nouveauxModeles.push(modele);
     }
     const hasStages = r.c1 + r.c1c2 + r.c1c3 + r.c1c2c3 > 0;
@@ -154,6 +166,6 @@ export function applyFlowTable(
     };
   });
   const nonTrouves = rows.filter((r) => !used.has(norm(r.nom))).map((r) => r.nom);
-  const sansDonnees = nodes.filter((n) => n.type === 'enneigeur' && !used.has(norm(n.nom))).map((n) => n.nom);
+  const sansDonnees = nodes.filter((n) => n.type === 'enneigeur' && !lookup(n.nom)).map((n) => n.nom);
   return { nodes, modeles, report: { rattaches: used.size, nonTrouves, sansDonnees, nouveauxModeles } };
 }

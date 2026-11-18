@@ -67,3 +67,21 @@ describe('Google Sheets', () => {
     expect(net.nodes[0]).toMatchObject({ nom: '318', lat: 42.77, actif: true, debit_c1: 3.5, couronnes: 'c1+c2', calque: 'existant' });
   });
 });
+
+describe('pressions mini', () => {
+  it('BP et modèle', async () => {
+    const { applyMinPressures, isBP } = await import('./defaults');
+    const net = emptyNetwork();
+    net.modeles.push({ ...net.modeles[0], modele: 'rubis', pression_min_bar: 18 });
+    net.nodes.push(
+      makeNode('enneigeur', 0, 0, net.params, { nom: '12', modele: 'rubis' }),
+      makeNode('enneigeur', 0, 0, net.params, { nom: 'BP179', modele: 'rubis' }),
+      makeNode('enneigeur', 0, 0, net.params, { nom: '13', modele: 'tl4', priorite: 'BP' }),
+    );
+    expect(isBP(net.nodes[1])).toBe(true);
+    expect(isBP({ nom: 'BPX', modele: '', priorite: '', notes: '' })).toBe(false);
+    const out = applyMinPressures(net);
+    expect(out.nodes.map((n) => n.pression_min_bar)).toEqual([18, 8, 8]);
+  });
+});
+

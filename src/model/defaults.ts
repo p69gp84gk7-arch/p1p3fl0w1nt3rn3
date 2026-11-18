@@ -10,6 +10,9 @@ export const DEFAULT_PARAMS: Params = {
   pression_min_defaut_bar: 12,
   tolerance_accrochage_m: 15,
   scenario_actif: '',
+  pression_min_bp_bar: 8,
+  pression_max_curseur_bar: 80,
+  reference_version: '',
 };
 
 export const DEFAULT_CATALOGUE: PipeSpec[] = [
@@ -135,6 +138,7 @@ export function makeNode(type: NodeType, lat: number, lon: number, params: Param
     debit_c1c2c3: 0,
     air: 0,
     priorite: '',
+    en_marche: true,
     ...extra,
   };
 }
@@ -160,5 +164,26 @@ export function makePipe(amont: string, aval: string, spec: PipeSpec = DEFAULT_P
     notes: '',
     calque: 'existant',
     ...extra,
+  };
+}
+
+/** Canon « basse pression » : « BP » dans le nom, le modèle, la priorité ou les notes. */
+export function isBP(n: Pick<NetNode, 'nom' | 'modele' | 'priorite' | 'notes'>): boolean {
+  const re = /(^|[^a-z])bp([^a-z]|$)/i;
+  return re.test(n.nom) || re.test(n.modele) || re.test(n.priorite) || re.test(n.notes);
+}
+
+/** Pression minimale d'un canon : BP → paramètre BP, sinon celle de son modèle. */
+export function minPressureFor(n: NetNode, net: Pick<Network, 'modeles' | 'params'>): number {
+  if (isBP(n)) return net.params.pression_min_bp_bar;
+  const m = net.modeles.find((x) => x.modele === n.modele);
+  return m && m.pression_min_bar > 0 ? m.pression_min_bar : n.pression_min_bar;
+}
+
+/** Applique à tous les enneigeurs / regards la pression mini de leur modèle (ou BP). */
+export function applyMinPressures(net: Network): Network {
+  return {
+    ...net,
+    nodes: net.nodes.map((n) => (isConsumer(n.type) ? { ...n, pression_min_bar: minPressureFor(n, net) } : n)),
   };
 }

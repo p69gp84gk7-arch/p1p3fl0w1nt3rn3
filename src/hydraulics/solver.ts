@@ -95,9 +95,20 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
   const nodeMap = new Map(calcNodes.map((n) => [n.id, n]));
   const allNodeIds = new Set(net.nodes.map((n) => n.id));
 
-  const sources = calcNodes.filter((n) => n.type === 'salle_machines');
+  const sources = calcNodes.filter((n) => n.type === 'salle_machines' && n.en_marche !== false);
   if (sources.length === 0) {
-    messages.push('Aucune salle des machines dans les calques calculés : ajoutez-en une pour lancer le calcul.');
+    messages.push(
+      calcNodes.some((n) => n.type === 'salle_machines')
+        ? 'Salle des machines à l’arrêt : le réseau n’est pas alimenté.'
+        : 'Aucune salle des machines dans les calques calculés : ajoutez-en une pour lancer le calcul.',
+    );
+    for (const n of net.nodes) {
+      result.nodes[n.id] = { id: n.id, charge_m: NaN, pression_bar: NaN, debit_m3h: 0, statut: 'isole', messages: ['Réseau non alimenté.'], vitesse_arrivee_m_s: NaN, debit_arrivee_m3h: 0 };
+    }
+    for (const p of net.pipes) {
+      result.pipes[p.id] = { id: p.id, debit_m3h: 0, vitesse_m_s: 0, perte_charge_m: 0, perte_m_km: 0, charge_amont_m: NaN, charge_aval_m: NaN, pression_max_bar: NaN, pression_min_bar: NaN, statut: 'isole', messages: ['Réseau non alimenté.'] };
+    }
+    result.converged = true;
     return result;
   }
 
@@ -133,7 +144,7 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
     link(p.aval, p, p.amont);
   }
   // Régulateurs actifs (surpresseurs, réducteurs) ; ceux « by-passés » sont de simples jonctions.
-  const boosters = calcNodes.filter((n) => isRegulator(n.type) && !passThrough.has(n.id));
+  const boosters = calcNodes.filter((n) => isRegulator(n.type) && n.en_marche !== false && !passThrough.has(n.id));
   const boosterIds = new Set(boosters.map((b) => b.id));
   const aspiration = new Map<string, string>(); // booster id → pipe id
   for (const b of boosters) {
@@ -516,7 +527,7 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
  * (simple passage), comme le fait EPANET, jusqu'à stabilisation.
  */
 export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
-  const regulators = net.nodes.filter((n) => isRegulator(n.type));
+  const regulators = net.nodes.filter((n) => isRegulator(n.type) && n.en_marche !== false);
   let pass = new Set<string>();
   let r = solveOnce(net, opts, pass);
   const tol = 0.01; // bar
@@ -529,10 +540,11 @@ export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
       if (!pass.has(n.id)) {
         const Pin = res.pression_aspiration_bar;
         if (Pin === undefined) continue;
-        if (n.type === 'surpresseur' && Pin > set + tol) next.add(n.id);
+        if (n.type === 'surpresseur' && (Pin > set + tol || Pin < 0)) next.add(n.id);
         if (n.type === 'reducteur' && Pin < set - tol) next.add(n.id);
       } else {
-        if (n.type === 'surpresseur' && res.pression_bar < set - tol) next.delete(n.id);
+        // Un surpresseur ne repart que si l'eau lui arrive (pression ≥ 0).
+        if (n.type === 'surpresseur' && res.pression_bar >= 0 && res.pression_bar < set - tol) next.delete(n.id);
         if (n.type === 'reducteur' && res.pression_bar > set + tol) next.delete(n.id);
       }
     }
@@ -559,9 +571,17 @@ export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
     if (!res) continue;
     res.messages.push(
       n.type === 'surpresseur'
-        ? "Surpresseur à l'arrêt : la pression d'arrivée dépasse déjà la consigne (by-pass)."
+        ? res.pression_bar < 0 || !Number.isFinite(res.pression_bar)
+          ? "Surpresseur désamorcé : l'eau n'arrive pas jusqu'à lui (augmentez la pression en amont)."
+          : "Surpresseur à l'arrêt : la pression d'arrivée dépasse déjà la consigne (by-pass)."
         : "Réducteur grand ouvert : la pression d'arrivée est inférieure à la consigne.",
     );
+    if (n.type === 'surpresseur' && (res.pression_bar < 0 || !Number.isFinite(res.pression_bar))) res.statut = 'alerte';
+  }
+  for (const n of net.nodes) {
+    if (isRegulator(n.type) && n.en_marche === false && r.nodes[n.id]) {
+      r.nodes[n.id].messages.push(n.type === 'surpresseur' ? 'Surpresseur à l’arrêt : l’eau le traverse sans surpression (by-pass).' : 'Réducteur hors service (grand ouvert).');
+    }
   }
   return r;
 }

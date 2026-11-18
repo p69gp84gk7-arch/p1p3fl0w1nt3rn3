@@ -263,4 +263,42 @@ describe('solveur', () => {
     net.pipes.push(makePipe('SM', 'E', spec, { id: 'C1' }));
     expect(solve(net).totals.debit_total_m3h).toBeCloseTo(7, 6);
   });
+
+  it('salle des machines à l’arrêt / surpresseur à l’arrêt (by-pass)', () => {
+    const net = base();
+    net.nodes.push(
+      makeNode('salle_machines', 45, 6, net.params, { id: 'SM', altitude_m: 1000, pression_consigne_bar: 30 }),
+      makeNode('surpresseur', 45, 6, net.params, { id: 'B', altitude_m: 1050, pression_consigne_bar: 40 }),
+      makeNode('enneigeur', 45, 6, net.params, { id: 'E', altitude_m: 1100, debit_m3h: 10 }),
+    );
+    net.pipes.push(makePipe('SM', 'B', spec, { id: 'C1', longueur_auto: false, longueur_m: 300 }), makePipe('B', 'E', spec, { id: 'C2', longueur_auto: false, longueur_m: 300 }));
+    const on = solve(net);
+    expect(on.nodes.B.pression_bar).toBeCloseTo(40, 6);
+    net.nodes[1].en_marche = false;
+    const bypass = solve(net);
+    expect(bypass.nodes.B.pression_bar).toBeLessThan(30);
+    expect(bypass.nodes.E.debit_m3h).toBeCloseTo(10, 6);
+    net.nodes[0].en_marche = false;
+    const off = solve(net);
+    expect(off.nodes.E.statut).toBe('isole');
+    expect(off.messages[0]).toMatch(/arrêt/);
+  });
+
+  it('surpresseur désamorcé tant que l’eau ne lui arrive pas', () => {
+    const net = base();
+    net.nodes.push(
+      makeNode('salle_machines', 45, 6, net.params, { id: 'SM', altitude_m: 1000, pression_consigne_bar: 10 }),
+      makeNode('surpresseur', 45, 6, net.params, { id: 'B', altitude_m: 1300, pression_consigne_bar: 40 }),
+      makeNode('enneigeur', 45, 6, net.params, { id: 'E', altitude_m: 1400, actif: false }),
+    );
+    net.pipes.push(makePipe('SM', 'B', spec, { id: 'C1', longueur_auto: false, longueur_m: 300 }), makePipe('B', 'E', spec, { id: 'C2', longueur_auto: false, longueur_m: 300 }));
+    const dry = solve(net); // 10 bar ≈ 102 m : l'eau n'atteint pas 1300 m
+    expect(dry.nodes.B.pression_bar).toBeLessThan(0);
+    expect(dry.nodes.E.pression_bar).toBeLessThan(0);
+    expect(dry.nodes.B.messages.join(' ')).toMatch(/désamorcé/);
+    net.nodes[0].pression_consigne_bar = 40; // ≈ 408 m : l'eau arrive, le booster repart
+    const wet = solve(net);
+    expect(wet.nodes.B.pression_bar).toBeCloseTo(40, 4);
+    expect(wet.nodes.E.pression_bar).toBeGreaterThan(29);
+  });
 });

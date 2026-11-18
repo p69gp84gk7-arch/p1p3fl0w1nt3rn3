@@ -1,16 +1,17 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { buildNetwork, guessNodeType, iconName, mergeKml, readKmlFile, type KmlContent } from '../import/kmz';
+import { buildNetwork, defaultImportChoices, mergeKml, readKmlFile, withPointOverrides, type ImportType, type KmlContent } from '../import/kmz';
 import { applyFlowTable, readFlowTable, type FlowRow } from '../import/csv';
 import { DEFAULT_MODELES, DEFAULT_PIPE_SPEC, LAYER_COLORS, NODE_LABEL, NODE_TYPES, emptyNetwork } from '../model/defaults';
 import { nearestPipe, splitPipe } from '../model/edit';
 import { newId } from '../model/ids';
-import type { Couronnes, Layer, Network, NodeType, PipeSpec } from '../model/types';
+import type { Couronnes, Layer, Network, PipeSpec } from '../model/types';
 import { COURONNES } from '../model/types';
 import { normalizeNetwork } from '../services/storage';
 import Modal from './Modal';
+import { REFERENCE_FILES } from '../data/reference';
 
-type PType = NodeType | 'ignorer';
+type PType = ImportType;
 
 interface Loaded {
   kml: KmlContent | null;
@@ -45,6 +46,23 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const loadBuiltin = async () => {
+    setError(null);
+    try {
+      const names = [...REFERENCE_FILES.kmz, REFERENCE_FILES.csv];
+      const files = await Promise.all(
+        names.map(async (n) => {
+          const res = await fetch(n);
+          if (!res.ok) throw new Error(`Fichier intégré introuvable : ${n}`);
+          return new File([await res.blob()], n.split('/').pop()!);
+        }),
+      );
+      await readFiles(files);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   return (
     <Modal title="Importer des données" onClose={onClose} wide>
       {!loaded ? (
@@ -65,8 +83,13 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
           <p>
             <b>Glissez vos fichiers ici</b> ou
           </p>
-          <label className="btn primary">
-            Choisir des fichiers
+          <button className="btn primary builtin" onClick={loadBuiltin}>
+            ⛷ Utiliser les fichiers intégrés de la station
+          </button>
+          <p className="small muted">canalisations.kmz, canons.kmz et debits-canons.csv — déjà dans l’application</p>
+          <p className="small muted">— ou —</p>
+          <label className="btn">
+            Choisir d’autres fichiers
             <input type="file" multiple accept=".kmz,.kml,.csv,.json,.txt" hidden onChange={(e) => e.target.files && readFiles(e.target.files)} />
           </label>
           <ul className="small muted formats">
@@ -161,14 +184,6 @@ function FlowsOnly({ flows, onBack, onDone }: { flows: FlowRow[]; onBack: () => 
   );
 }
 
-function defaultCategoryType(kml: KmlContent, category: string): PType {
-  const pts = kml.points.filter((p) => p.category === category);
-  const numeric = pts.filter((p) => /^\d+\s*[a-z]?$/i.test(p.name.trim())).length;
-  if (numeric >= pts.length / 2) return 'enneigeur';
-  const g = guessNodeType(category);
-  return g === 'enneigeur' ? (/canon|enneig/i.test(category) ? 'enneigeur' : 'jonction') : g;
-}
-
 function KmlConfig({ loaded, net, onBack, onDone }: { loaded: Loaded; net: Network; onBack: () => void; onDone: () => void }) {
   const kml = loaded.kml!;
   const st = useStore.getState;
@@ -190,16 +205,10 @@ function KmlConfig({ loaded, net, onBack, onDone }: { loaded: Loaded; net: Netwo
   const [mode, setMode] = useState<'remplacer' | 'ajouter'>(hasNet ? 'ajouter' : 'remplacer');
   const [layerChoice, setLayerChoice] = useState<string>(hasNet ? '__new__' : 'existant');
   const [newLayerName, setNewLayerName] = useState('Projet futur');
-  const [catTypes, setCatTypes] = useState<Record<string, PType>>(() => Object.fromEntries(categories.map(([c]) => [c, defaultCategoryType(kml, c)])));
-  const [catModels, setCatModels] = useState<Record<string, string>>(() => Object.fromEntries(categories.map(([c, v]) => [c, iconName(v.icon) && v.icon.startsWith('files/') ? iconName(v.icon) : ''])));
-  const [pointTypes, setPointTypes] = useState<Record<number, PType>>(() => {
-    const o: Record<number, PType> = {};
-    kml.points.forEach((p, i) => {
-      const g = guessNodeType(p.name);
-      if (g !== 'enneigeur') o[i] = g;
-    });
-    return o;
-  });
+  const defaults = useMemo(() => defaultImportChoices(kml), [kml]);
+  const [catTypes, setCatTypes] = useState<Record<string, PType>>(defaults.catTypes);
+  const [catModels, setCatModels] = useState<Record<string, string>>(defaults.catModels);
+  const [pointTypes, setPointTypes] = useState<Record<number, PType>>(defaults.pointTypes);
   const [lineSpecs, setLineSpecs] = useState<Record<string, string>>(() => Object.fromEntries(lineFolders.map(([f]) => [f, DEFAULT_PIPE_SPEC.ref])));
   const [detectDn, setDetectDn] = useState(true);
   const [tol, setTol] = useState(net.params.tolerance_accrochage_m || 15);
@@ -211,16 +220,7 @@ function KmlConfig({ loaded, net, onBack, onDone }: { loaded: Loaded; net: Netwo
   const targetLayerId = layerChoice === '__new__' ? '__new__' : layerChoice;
 
   const build = () => {
-    // Sous-ensemble de points avec un type par point (catégorie ou surcharge).
-    const kml2: KmlContent = { ...kml, points: kml.points.map((p, i) => ({ ...p, category: pointTypes[i] ? `${p.category}#${i}` : p.category })) };
-    const categoryTypes: Record<string, PType> = { ...catTypes };
-    const categoryModels: Record<string, string> = { ...catModels };
-    kml.points.forEach((p, i) => {
-      if (pointTypes[i]) {
-        categoryTypes[`${p.category}#${i}`] = pointTypes[i];
-        categoryModels[`${p.category}#${i}`] = catModels[p.category];
-      }
-    });
+    const { kml: kml2, categoryTypes, categoryModels } = withPointOverrides(kml, catTypes, catModels, pointTypes);
     const folderSpecs: Record<string, PipeSpec | 'ignorer'> = {};
     for (const [f, ref] of Object.entries(lineSpecs)) folderSpecs[f] = ref === 'ignorer' ? 'ignorer' : catalogue.find((c) => c.ref === ref) ?? DEFAULT_PIPE_SPEC;
     return buildNetwork(kml2, {

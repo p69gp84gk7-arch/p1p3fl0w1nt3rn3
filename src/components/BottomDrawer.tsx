@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { couronneField, effectiveFlow, isConsumer, NODE_LABEL } from '../model/defaults';
+import { couronneField, effectiveFlow, isConsumer, NODE_LABEL, NODE_TYPES } from '../model/defaults';
 import { nodeMapOf } from '../model/edit';
 import { pipeLength } from '../hydraulics/solver';
-import { COURONNES, type Couronnes, type NetNode } from '../model/types';
+import { COURONNES, type Couronnes, type NetNode, type NodeType } from '../model/types';
 import { fmt, STATUS_COLOR, STATUS_LABEL } from './display';
 import ProfileChart from './ProfileChart';
 
@@ -15,7 +15,7 @@ export default function BottomDrawer() {
   const st = useStore.getState;
   const nAlerts = results ? Object.values(results.nodes).filter((r) => r.statut === 'erreur' || r.statut === 'alerte').length + Object.values(results.pipes).filter((r) => r.statut === 'erreur' || r.statut === 'alerte').length : 0;
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'enneigeurs', label: 'Enneigeurs' },
+    { id: 'enneigeurs', label: 'Regards & enneigeurs' },
     { id: 'canalisations', label: 'Canalisations' },
     { id: 'alertes', label: `Alertes${results ? ` (${nAlerts})` : ''}` },
     { id: 'profil', label: 'Profil en long' },
@@ -53,10 +53,14 @@ function GunsTable() {
   const st = useStore.getState;
   const [secteur, setSecteur] = useState('');
   const [q, setQ] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'canons' | 'tous' | NodeType>('canons');
   const secteurs = useMemo(() => [...new Set(net.nodes.map((n) => n.secteur).filter(Boolean))].sort(), [net.nodes]);
   const locked = useMemo(() => new Set(net.calques.filter((l) => l.verrouille).map((l) => l.id)), [net.calques]);
   const rows = net.nodes.filter(
-    (n) => isConsumer(n.type) && (!secteur || n.secteur === secteur) && (!q || `${n.nom} ${n.modele}`.toLowerCase().includes(q.toLowerCase())),
+    (n) =>
+      (typeFilter === 'tous' || (typeFilter === 'canons' ? isConsumer(n.type) : n.type === typeFilter)) &&
+      (!secteur || n.secteur === secteur) &&
+      (!q || `${n.nom} ${n.modele}`.toLowerCase().includes(q.toLowerCase())),
   );
   const bulk = (patch: (n: NetNode) => Partial<NetNode>) => {
     const ids = new Set(rows.filter((r) => !locked.has(r.calque)).map((r) => r.id));
@@ -74,15 +78,24 @@ function GunsTable() {
             <option key={s}>{s}</option>
           ))}
         </select>
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}>
+          <option value="canons">Enneigeurs et regards</option>
+          <option value="tous">Tous les points</option>
+          {NODE_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {NODE_LABEL[t]}
+            </option>
+          ))}
+        </select>
         <input placeholder="Rechercher…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="muted small">
-          {rows.length} enneigeurs · {rows.filter((r) => r.actif).length} en production · {fmt(totalQ, 1)} m³/h
+          {rows.length} points · {rows.filter((r) => r.actif).length} en production · {fmt(totalQ, 1)} m³/h
         </span>
         <span className="spacer" />
-        <button className="btn small" onClick={() => bulk(() => ({ actif: true }))}>
+        <button className="btn small" onClick={() => bulk((n) => (isConsumer(n.type) ? { actif: true } : {}))}>
           Tout démarrer
         </button>
-        <button className="btn small" onClick={() => bulk(() => ({ actif: false }))}>
+        <button className="btn small" onClick={() => bulk((n) => (isConsumer(n.type) ? { actif: false } : {}))}>
           Tout arrêter
         </button>
         <select
@@ -109,13 +122,16 @@ function GunsTable() {
             <tr>
               <th>Marche</th>
               <th>Nom</th>
+              <th>Type</th>
               <th>Piste</th>
               <th>Modèle</th>
               <th>Couronnes</th>
               <th className="num">Débit m³/h</th>
               <th className="num">Alt. m</th>
               <th className="num">P mini</th>
-              <th className="num">P calculée</th>
+              <th className="num">Pression bar</th>
+              <th className="num">Vitesse arrivée m/s</th>
+              <th className="num">Q arrivée m³/h</th>
               <th>État</th>
             </tr>
           </thead>
@@ -126,25 +142,32 @@ function GunsTable() {
               return (
                 <tr key={n.id} className={selection?.id === n.id ? 'selected' : ''} onClick={() => st().setSelection({ kind: 'node', id: n.id })}>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={n.actif} disabled={lk} onChange={(e) => up(n.id, { actif: e.target.checked })} />
+                    {isConsumer(n.type) && <input type="checkbox" checked={n.actif} disabled={lk} onChange={(e) => up(n.id, { actif: e.target.checked })} />}
                   </td>
                   <td>{n.nom}</td>
+                  <td className="muted">{NODE_LABEL[n.type]}</td>
                   <td>{n.secteur}</td>
                   <td>{n.modele}</td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <select value={n.couronnes} disabled={lk} onChange={(e) => up(n.id, { couronnes: e.target.value as Couronnes })}>
-                      <option value="">Manuel</option>
-                      {COURONNES.map((c) => (
-                        <option key={c} value={c} disabled={!(n[couronneField(c)] > 0)}>
-                          {c.toUpperCase()}
-                        </option>
-                      ))}
-                    </select>
+                    {isConsumer(n.type) && (
+                      <select value={n.couronnes} disabled={lk} onChange={(e) => up(n.id, { couronnes: e.target.value as Couronnes })}>
+                        <option value="">Manuel</option>
+                        {COURONNES.map((c) => (
+                          <option key={c} value={c} disabled={!(n[couronneField(c)] > 0)}>
+                            {c.toUpperCase()}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </td>
-                  <td className="num">{fmt(effectiveFlow(n), 1)}</td>
+                  <td className="num">{isConsumer(n.type) ? fmt(effectiveFlow(n), 1) : ''}</td>
                   <td className="num">{fmt(n.altitude_m, 0)}</td>
-                  <td className="num">{fmt(n.pression_min_bar, 1)}</td>
-                  <td className="num">{r ? fmt(r.pression_bar, 1) : ''}</td>
+                  <td className="num">{isConsumer(n.type) ? fmt(n.pression_min_bar, 1) : ''}</td>
+                  <td className="num">
+                    <b>{r ? fmt(r.pression_bar, 1) : ''}</b>
+                  </td>
+                  <td className="num">{r ? fmt(r.vitesse_arrivee_m_s, 2) : ''}</td>
+                  <td className="num">{r && r.debit_arrivee_m3h > 0 ? fmt(r.debit_arrivee_m3h, 1) : ''}</td>
                   <td>{r && <Dot statut={r.statut} />}</td>
                 </tr>
               );

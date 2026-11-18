@@ -9,11 +9,31 @@ Application web de **calcul de débit et de pression des réseaux de neige de cu
 - **Altitudes automatiques** depuis la position GPS de chaque élément (IGN RGE ALTI® en France, Copernicus DEM ailleurs), à l'import, à la création et au déplacement.
 - **Édition sur carte** : ajout d'éléments (sur une canalisation → insertion automatique), tracé de canalisations, coupe, fusion, déplacement, **modification des liaisons** (changer l'amont/l'aval, inverser), annuler/rétablir.
 - **Tout est éditable** : diamètres (catalogue fonte / acier / PEHD modifiable), rugosité, PN, pertes singulières, débits, couronnes, pression mini, consignes des salles des machines et surpresseurs, vannes ouvertes/fermées.
+- **Pompage** : pression de refoulement et débit maximal de l'usine et du booster, débit calculé et taux de charge.
+- **Pression et vitesse à chaque regard** : pression disponible, vitesse et débit d'arrivée de l'eau, affichés dans la fiche, le tableau des regards et sur la carte.
 - **Calcul hydraulique** : Darcy-Weisbach (Swamee-Jain), méthode du gradient global (EPANET), réseaux ramifiés et maillés, buses Q = k·√P, surpresseurs et réducteurs de pression avec by-pass automatique.
 - **Contrôles** : pression insuffisante aux canons, vitesse excessive, dépassement de PN (y compris aux points bas du tracé), dépression aux points hauts, capacité des pompes. **Pression statique** en un clic.
 - **Scénarios** (canons en marche + couronnes), **profil en long** avec ligne piézométrique.
 - **Calques** (« Existant », « Projet 2027 »…) : affichage, inclusion dans le calcul et verrouillage par calque, pour simuler les extensions futures.
 - **Google Sheets** comme base de données (lecture / écriture / résultats) ; export JSON et CSV.
+
+## Réseau de la station (intégré)
+
+Les fichiers de la station sont intégrés à l'application, dans `public/data/` :
+
+| Fichier | Contenu |
+| --- | --- |
+| `canalisations.kmz` | Tracé des canalisations, usine principale, booster |
+| `canons.kmz` | Position des canons, par piste |
+| `debits-canons.csv` | Débits par étage de couronnes, modèle, air, priorité |
+
+À la première ouverture, l'application charge le réseau construit à partir de ces fichiers (`src/data/reseau-reference.json`), avec les **altitudes IGN de chaque regard et de chaque sommet de canalisation**. Les canons sont à l'arrêt ; un scénario par piste est prêt à l'emploi. On peut le recharger à tout moment (**Fichier → Recharger le réseau de référence**) ou le réimporter avec d'autres réglages (**Importer → Utiliser les fichiers intégrés**).
+
+Après une mise à jour des fichiers, régénérer le réseau (accès réseau à `data.geopf.fr` nécessaire) :
+
+```bash
+npm run reseau:generer
+```
 
 ## Base de données Google Sheets
 

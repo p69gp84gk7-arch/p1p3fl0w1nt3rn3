@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { pipePath } from '../model/geo';
 import { addNode, connect, nearestPipe, nodeMapOf, reconnect, splitPipe } from '../model/edit';
 import type { GeoPoint, NetNode, Network, Pipe } from '../model/types';
-import { BASE_LAYERS, binColor, categoryColor, DN_BINS, fmt, nodeIcon, PISTES_OVERLAY, pipeWeight, PRESSURE_BINS, STATUS_COLOR, VELOCITY_BINS } from './display';
+import { BASE_LAYERS, binColor, categoryColor, DN_BINS, fmt, nodeIcon, PISTES_OVERLAY, pipeWeight, PRESSURE_BINS, resultLabel, STATUS_COLOR, VELOCITY_BINS } from './display';
 import { NODE_LABEL } from '../model/defaults';
 import { profilePath } from './profile';
 
@@ -78,6 +78,7 @@ function NetworkLayers() {
   const tool = useStore((s) => s.tool);
   const colorBy = useStore((s) => s.colorBy);
   const showLabels = useStore((s) => s.showLabels);
+  const showResults = useStore((s) => s.showResults);
   const activeLayer = useStore((s) => s.activeLayer);
   const drawSpec = useStore((s) => s.drawSpec);
   const bottomTab = useStore((s) => s.bottomTab);
@@ -278,6 +279,8 @@ function NetworkLayers() {
   };
 
   const labelsOn = showLabels && zoom >= 15;
+  const resultsOn = showResults && !!showRes && zoom >= 15;
+  const pipeResultsOn = showResults && !!showRes && zoom >= 16;
   const draggable = tool.kind === 'move';
   const startNode = drawing ? nodes.get(drawing.start) : undefined;
 
@@ -306,7 +309,12 @@ function NetworkLayers() {
             }}
             eventHandlers={{ click: (e) => onPipeClick(p, e.latlng) }}
           >
-            <Tooltip sticky direction="top" opacity={0.95}>
+            {pipeResultsOn && r && r.vitesse_m_s > 0.005 ? (
+              <Tooltip key="res" permanent direction="center" className="pipe-result" opacity={1}>
+                {fmt(r.vitesse_m_s, 1)} m/s
+              </Tooltip>
+            ) : (
+            <Tooltip key="info" sticky direction="top" opacity={0.95}>
               <strong>{p.nom || p.id}</strong> · DN{p.dn} {p.materiau}
               {r && Number.isFinite(r.pression_max_bar) && (
                 <>
@@ -315,6 +323,7 @@ function NetworkLayers() {
                 </>
               )}
             </Tooltip>
+            )}
           </Polyline>
         );
       })}
@@ -328,7 +337,14 @@ function NetworkLayers() {
           <Marker
             key={n.id}
             position={[n.lat, n.lon]}
-            icon={nodeIcon(n.type, nodeColor(n), sel, inactive || closed, labelsOn ? n.nom : undefined)}
+            icon={nodeIcon(
+              n.type,
+              nodeColor(n),
+              sel,
+              inactive || closed,
+              labelsOn ? n.nom : undefined,
+              resultsOn && r && n.type !== 'jonction' ? resultLabel(r.pression_bar, r.vitesse_arrivee_m_s) : undefined,
+            )}
             draggable={draggable && !locked(n.calque)}
             zIndexOffset={n.type === 'jonction' ? 0 : n.type === 'salle_machines' ? 1000 : 500}
             eventHandlers={{
@@ -343,6 +359,7 @@ function NetworkLayers() {
               Alt. {fmt(n.altitude_m, 0)} m
               {r && Number.isFinite(r.pression_bar) && <> · {fmt(r.pression_bar, 1)} bar</>}
               {r && r.debit_m3h > 0 && <> · {fmt(r.debit_m3h, 1)} m³/h</>}
+              {r && Number.isFinite(r.vitesse_arrivee_m_s) && r.vitesse_arrivee_m_s > 0 && <> · arrivée {fmt(r.vitesse_arrivee_m_s, 2)} m/s</>}
             </Tooltip>
           </Marker>
         );

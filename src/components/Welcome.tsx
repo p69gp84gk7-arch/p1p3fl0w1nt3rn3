@@ -25,10 +25,13 @@ export default function Welcome({ openDialog }: { openDialog: (d: Dialog) => voi
         <h1>Bienvenue dans PipeFlow Neige</h1>
         <p className="muted">Calculez les débits et pressions de votre réseau de neige de culture, simulez vos scénarios de production et vos projets d’extension.</p>
         <div className="welcome-actions">
-          <button className="welcome-action" onClick={() => openDialog('import')}>
-            <span className="wa-icon">🗺️</span>
-            <b>Importer mes fichiers KMZ</b>
-            <span className="muted small">Canons, regards et canalisations depuis Google Earth, + CSV des débits</span>
+          <button
+            className="welcome-action"
+            onClick={() => void st().loadReference()}
+          >
+            <span className="wa-icon">⛷</span>
+            <b>Ouvrir le réseau de la station</b>
+            <span className="muted small">Canalisations, canons et débits intégrés à l’application, altitudes IGN</span>
           </button>
           <button className="welcome-action" onClick={openSheets}>
             <span className="wa-icon">☁️</span>
@@ -47,6 +50,11 @@ export default function Welcome({ openDialog }: { openDialog: (d: Dialog) => voi
             <span className="muted small">Petit réseau fictif avec surpresseur et calque projet</span>
           </button>
         </div>
+        <p className="small">
+          <button className="linklike" onClick={() => openDialog('import')}>
+            ou importer d’autres fichiers KMZ / CSV…
+          </button>
+        </p>
         <ol className="steps small">
           <li>Importez ou dessinez le réseau</li>
           <li>Ajustez diamètres, débits et salles des machines</li>

@@ -9,7 +9,7 @@ import Welcome from './components/Welcome';
 import ImportDialog from './components/ImportDialog';
 import SettingsDialog from './components/SettingsDialog';
 import HelpDialog from './components/HelpDialog';
-import { useStore } from './store';
+import { firstVisit, useStore } from './store';
 import { deleteNode, deletePipe } from './model/edit';
 
 export type Dialog = 'import' | 'settings' | 'help' | null;
@@ -21,6 +21,9 @@ export default function App() {
   const tool = useStore((s) => s.tool);
 
   useKeyboardShortcuts();
+  useEffect(() => {
+    if (firstVisit) void useStore.getState().loadReference();
+  }, []);
 
   return (
     <div className={`app tool-${tool.kind}`}>
@@ -30,7 +33,7 @@ export default function App() {
         <div className="map-area">
           <MapView />
           <ToolHint />
-          {empty && <Welcome openDialog={setDialog} />}
+          {empty && !busy && <Welcome openDialog={setDialog} />}
           <BottomDrawer />
         </div>
         <SidePanel />

@@ -92,15 +92,21 @@ export function nodeSvg(type: NodeType, fill: string, size = 18, inactive = fals
 }
 
 const iconCache = new Map<string, L.DivIcon>();
-export function nodeIcon(type: NodeType, fill: string, selected: boolean, inactive: boolean, label?: string): L.DivIcon {
-  const key = `${type}|${fill}|${selected}|${inactive}|${label ?? ''}`;
+/** Petite étiquette « 23,4 bar · 1,8 m/s » affichée à côté d'un nœud. */
+export function resultLabel(pression: number, vitesse: number | undefined): string | undefined {
+  if (!Number.isFinite(pression)) return undefined;
+  const v = vitesse !== undefined && Number.isFinite(vitesse) && vitesse > 0 ? ` <span class="v">${fmt(vitesse, 1)} m/s</span>` : '';
+  return `${fmt(pression, 1)} bar${v}`;
+}
+export function nodeIcon(type: NodeType, fill: string, selected: boolean, inactive: boolean, label?: string, result?: string): L.DivIcon {
+  const key = `${type}|${fill}|${selected}|${inactive}|${label ?? ''}|${result ?? ''}`;
   let icon = iconCache.get(key);
   if (!icon) {
     const size = type === 'jonction' ? 18 : 18;
     const box = type === 'salle_machines' ? 26 : type === 'surpresseur' ? 22 : 18;
     icon = L.divIcon({
       className: `node-icon${selected ? ' is-selected' : ''}`,
-      html: `${nodeSvg(type, fill, size, inactive)}${label ? `<span class="node-label">${escapeHtml(label)}</span>` : ''}`,
+      html: `${nodeSvg(type, fill, size, inactive)}${label ? `<span class="node-label">${escapeHtml(label)}</span>` : ''}${result ? `<span class="node-result">${result}</span>` : ''}`,
       iconSize: [box, box],
       iconAnchor: [box / 2, box / 2],
     });

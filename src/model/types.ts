@@ -173,6 +173,10 @@ export interface NodeResult {
   debit_m3h: number;
   /** Surpresseur : pression à l'aspiration (bar). */
   pression_aspiration_bar?: number;
+  /** Vitesse de l'eau dans la (les) canalisation(s) qui alimente(nt) le nœud (m/s, la plus forte). */
+  vitesse_arrivee_m_s: number;
+  /** Débit arrivant au nœud (m³/h). */
+  debit_arrivee_m3h: number;
   statut: ResultStatus;
   messages: string[];
 }

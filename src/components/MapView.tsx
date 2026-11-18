@@ -7,6 +7,7 @@ import { addNode, connect, nearestPipe, nodeMapOf, reconnect, splitPipe } from '
 import type { GeoPoint, NetNode, Network, Pipe } from '../model/types';
 import { BASE_LAYERS, binColor, categoryColor, DN_BINS, DRY_COLOR, WATER_COLOR, fmt, nodeIcon, PISTES_OVERLAY, pipeWeight, PRESSURE_BINS, STATUS_COLOR, VELOCITY_BINS } from './display';
 import { nodeBubble, pipeLabel } from './labels';
+import { boosterZones } from '../hydraulics/zones';
 import { pipeProfile } from '../hydraulics/solver';
 import { isConsumer } from '../model/defaults';
 
@@ -82,6 +83,7 @@ function NetworkLayers() {
   const tool = useStore((s) => s.tool);
   const colorBy = useStore((s) => s.colorBy);
   const filling = useStore((s) => s.filling);
+  const fillLevels = useStore((s) => s.fillLevels);
   const settings = useStore((s) => s.settings);
   const activeLayer = useStore((s) => s.activeLayer);
   const drawSpec = useStore((s) => s.drawSpec);
@@ -276,7 +278,7 @@ function NetworkLayers() {
       case 'pression':
         return r ? binColor(PRESSURE_BINS, r.pression_bar) : '#5d6d7e';
       case 'remplissage':
-        return r && r.pression_bar >= 0 ? (filling ? WATER_COLOR : binColor(PRESSURE_BINS, r.pression_bar)) : DRY_COLOR;
+        return isWet(n, r) ? (filling ? WATER_COLOR : binColor(PRESSURE_BINS, r!.pression_bar)) : DRY_COLOR;
       case 'diametre':
       case 'vitesse':
         return '#5d6d7e';
@@ -285,6 +287,40 @@ function NetworkLayers() {
         if (n.type === 'jonction' && r.statut === 'ok') return '#5d6d7e';
         return STATUS_COLOR[r.statut];
     }
+  };
+
+  // Zones alimentées uniquement par un booster (remplissage par le bas, information « attente booster »).
+  const zoneOf = useMemo(() => {
+    const m = new Map<string, string>();
+    if (colorBy !== 'remplissage' && !filling) return m;
+    for (const [b, zone] of boosterZones(net)) for (const id of zone) m.set(id, b);
+    return m;
+  }, [net, colorBy, filling]);
+  const levelFor = (nodeId: string): number | undefined => {
+    const b = zoneOf.get(nodeId);
+    return b !== undefined ? fillLevels[b] : undefined;
+  };
+  const pipeLevel = (p: Pipe): number | undefined => {
+    const b = zoneOf.get(p.aval) ?? zoneOf.get(p.amont);
+    return b !== undefined ? fillLevels[b] : undefined;
+  };
+  /** Le point est-il rempli d'eau ? */
+  const isWet = (n: NetNode, r: { pression_bar: number } | undefined) => {
+    const lvl = levelFor(n.id);
+    return !!r && r.pression_bar >= 0 && (lvl === undefined || n.altitude_m <= lvl);
+  };
+  /** Pourquoi un point est vide (information sur les canons et canalisations). */
+  const dryReason = (nodeId: string, r: { pression_bar: number } | undefined): string => {
+    const b = zoneOf.get(nodeId);
+    if (b) {
+      const bn = nodes.get(b);
+      const br = showRes?.nodes[b];
+      if (bn?.en_marche === false) return 'booster arrêté';
+      if (!br || !Number.isFinite(br.pression_bar)) return 'attente du booster';
+      if (filling) return 'remplissage…';
+    }
+    if (!r || !Number.isFinite(r.pression_bar)) return 'non alimenté';
+    return 'au-dessus du niveau d’eau';
   };
 
   /** Mode niveau d'eau : morceaux de tracé pleins (colorés par pression) ou vides. */
@@ -296,7 +332,12 @@ function NetworkLayers() {
       return [{ pts: prof.map((q) => [q.lat, q.lon]), P: NaN }];
     }
     const L = prof[prof.length - 1].s || 1;
-    const P = prof.map((q) => (r.charge_amont_m + ((r.charge_aval_m - r.charge_amont_m) * q.s) / L - q.z) * BAR_PER_M);
+    const lvl = pipeLevel(p);
+    // Au-dessus du niveau de remplissage d'une zone booster : vide (pression ramenée à -1).
+    const P = prof.map((q) => {
+      const v = (r.charge_amont_m + ((r.charge_aval_m - r.charge_amont_m) * q.s) / L - q.z) * BAR_PER_M;
+      return lvl !== undefined && q.z > lvl ? Math.min(v, -0.001 - (q.z - lvl) * 0.001) : v;
+    });
     const out: { pts: [number, number][]; P: number }[] = [];
     for (let i = 0; i < prof.length - 1; i++) {
       const a = prof[i];
@@ -355,6 +396,20 @@ function NetworkLayers() {
               ) : (
                 <Tooltip key="info" sticky direction="top" opacity={0.95}>
                   <strong>{p.nom || p.id}</strong> · DN{p.dn} {p.materiau}
+                  {p.diametre_estime && ' (estimé)'}
+                  {(fill || filling) && (() => {
+                    const a = nodes.get(p.amont);
+                    const b = nodes.get(p.aval);
+                    const wa = a && isWet(a, showRes?.nodes[a.id]);
+                    const wb = b && isWet(b, showRes?.nodes[b.id]);
+                    if (wa && wb) return null;
+                    return (
+                      <>
+                        <br />
+                        {wa || wb ? 'Partiellement vide' : 'Vide'} : {dryReason(wa ? p.aval : p.amont, showRes?.nodes[wa ? p.aval : p.amont])}
+                      </>
+                    );
+                  })()}
                   {r && Number.isFinite(r.pression_max_bar) && (
                     <>
                       <br />
@@ -380,7 +435,8 @@ function NetworkLayers() {
         const r = showRes?.nodes[n.id];
         const inactive = (isConsumer(n.type) && !n.actif) || (n.type !== 'vanne' && n.en_marche === false && !isConsumer(n.type) && n.type !== 'jonction');
         const closed = n.type === 'vanne' && !n.actif;
-        const bubble = bubblesOn && wantsBubble(n) ? nodeBubble(n, r, settings.nodeLabels) : '';
+        const dry = (fill || filling) && !isWet(n, r) ? dryReason(n.id, r) : undefined;
+        const bubble = bubblesOn && wantsBubble(n) ? nodeBubble(n, r, settings.nodeLabels, dry) : '';
         return (
           <Marker
             key={n.id}
@@ -401,6 +457,13 @@ function NetworkLayers() {
               {r && Number.isFinite(r.pression_bar) && <> · {fmt(r.pression_bar, 1)} bar</>}
               {r && r.debit_m3h > 0 && <> · {fmt(r.debit_m3h, 1)} m³/h</>}
               {r && Number.isFinite(r.vitesse_arrivee_m_s) && r.vitesse_arrivee_m_s > 0 && <> · arrivée {fmt(r.vitesse_arrivee_m_s, 2)} m/s</>}
+              {r?.pression_vanne_bar !== undefined && r.pression_vanne_bar < r.pression_bar - 0.05 && <> · vanne {fmt(r.pression_vanne_bar, 1)} bar</>}
+              {dry && (
+                <>
+                  <br />
+                  Vide : {dry}
+                </>
+              )}
             </Tooltip>
           </Marker>
         );

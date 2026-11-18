@@ -9,7 +9,7 @@ import { JSDOM } from 'jsdom';
 (globalThis as unknown as { DOMParser: unknown }).DOMParser = new JSDOM().window.DOMParser;
 
 const { readKmlFile } = await import('../src/import/kmz');
-const { buildReferenceNetwork, calibrateReference, REFERENCE_FILES } = await import('../src/data/reference');
+const { buildReferenceNetwork, calibrateReference, calibrateReferenceDiameters, REFERENCE_FILES } = await import('../src/data/reference');
 const { fetchElevations } = await import('../src/services/elevation');
 
 const read = (p: string) => new Uint8Array(readFileSync(`public/${p}`)).buffer;
@@ -28,9 +28,11 @@ const r1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
 net.nodes = net.nodes.map((n) => ({ ...n, altitude_m: r1(z[k++]) ?? 0 }));
 net.pipes = net.pipes.map((p) => ({ ...p, geometrie: p.geometrie.map((g) => [g[0], g[1], r1(z[k++])] as typeof g) }));
 const missing = z.filter((v) => v == null).length;
-const calibrated = calibrateReference(net);
+const calibrated = calibrateReferenceDiameters(calibrateReference(net));
 net.nodes = calibrated.nodes;
 net.params = calibrated.params;
+net.pipes = calibrated.pipes;
+console.log('diamètres :', [...new Set(net.pipes.map((p) => `DN${p.dn}`))].join(', '));
 
 writeFileSync('src/data/reseau-reference.json', JSON.stringify(net));
 console.log(`${net.nodes.length} nœuds, ${net.pipes.length} canalisations, ${missing} altitudes manquantes`);

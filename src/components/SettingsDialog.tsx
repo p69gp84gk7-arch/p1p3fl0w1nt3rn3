@@ -251,7 +251,7 @@ function ModelsTab() {
           nodes: cur.nodes.map((n) => (isConsumer(n.type) && !isBP(n) && changed.has(n.modele) ? { ...n, pression_min_bar: changed.get(n.modele)! } : n)),
         });
       }}
-      make={() => ({ modele: 'Nouveau modèle', type: 'perche', debit_nominal_m3h: 15, debit_min_m3h: 3, debit_max_m3h: 25, pression_min_bar: 15, pression_max_bar: 60, k_buse: 2.5 })}
+      make={() => ({ modele: 'Nouveau modèle', type: 'perche', debit_nominal_m3h: 15, debit_min_m3h: 3, debit_max_m3h: 25, pression_min_bar: 15, pression_max_bar: 60, k_buse: 2.5, pression_regulation_bar: 0 })}
       cols={[
         { key: 'modele', label: 'Modèle' },
         { key: 'type', label: 'Type' },
@@ -260,6 +260,7 @@ function ModelsTab() {
         { key: 'debit_max_m3h', label: 'Q max', num: true },
         { key: 'pression_min_bar', label: 'P min (bar)', num: true },
         { key: 'pression_max_bar', label: 'P max (bar)', num: true },
+        { key: 'pression_regulation_bar', label: 'Régulation vanne (bar)', num: true },
         { key: 'k_buse', label: 'k buse', num: true },
       ]}
     />

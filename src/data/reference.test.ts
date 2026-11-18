@@ -6,6 +6,8 @@ import { referenceNetwork } from './referenceNetwork';
 import { solve } from '../hydraulics/solver';
 import { applyScenario, staticNetwork } from '../model/scenario';
 import { pressureAt } from '../hydraulics/calage';
+import { allOpenNetwork } from '../hydraulics/diametres';
+import { boosterZones } from '../hydraulics/zones';
 
 const read = (p: string) => new Uint8Array(readFileSync(`public/${p}`)).buffer;
 
@@ -82,5 +84,41 @@ describe('réseau de référence intégré', () => {
     const low = solve(staticNetwork({ ...ref, nodes: ref.nodes.map((n) => (n.id === sdm.id ? { ...n, pression_consigne_bar: 40 } : n)) }));
     expect(low.nodes[booster.id].messages.join(' ')).toMatch(/désamorcé/);
     expect(hount.every((n) => low.nodes[n.id].statut === 'isole')).toBe(true);
+  });
+
+  it('Revo / Rubis : 18 bar mini, vanne régulée à 45 bar (pression regard et vanne)', async () => {
+    const ref = await referenceNetwork();
+    for (const m of ['rubis', 'revo']) {
+      const mod = ref.modeles.find((x) => x.modele === m)!;
+      expect(mod.pression_min_bar).toBe(18);
+      expect(mod.pression_regulation_bar).toBe(45);
+    }
+    const r = solve(staticNetwork(ref));
+    const high = ref.nodes.filter((n) => n.modele === 'rubis' && r.nodes[n.id].pression_bar > 45);
+    expect(high.length).toBeGreaterThan(0);
+    for (const n of high) expect(r.nodes[n.id].pression_vanne_bar).toBe(45);
+    const low = ref.nodes.find((n) => n.modele === 'rubis' && r.nodes[n.id].pression_bar < 45)!;
+    expect(r.nodes[low.id].pression_vanne_bar).toBeCloseTo(r.nodes[low.id].pression_bar, 9);
+  });
+
+  it('diamètres estimés calés : 15 à 17 bar au 122 tout ouvert, la pression augmente en descendant', async () => {
+    const ref = await referenceNetwork();
+    expect(ref.pipes.every((p) => p.diametre_estime)).toBe(true);
+    const r = solve(allOpenNetwork(ref));
+    const n122 = ref.nodes.find((n) => n.nom === '122')!;
+    expect(r.nodes[n122.id].pression_bar).toBeGreaterThan(14);
+    expect(r.nodes[n122.id].pression_bar).toBeLessThan(19);
+    // estives : plus bas = plus de pression
+    const est = ref.nodes.filter((n) => n.secteur === 'estives').sort((a, b) => b.altitude_m - a.altitude_m);
+    expect(r.nodes[est[est.length - 1].id].pression_bar).toBeGreaterThan(r.nodes[est[0].id].pression_bar);
+  });
+
+  it('zone du booster : la piste de Hount n’est alimentée que par le booster', async () => {
+    const ref = await referenceNetwork();
+    const booster = ref.nodes.find((n) => n.type === 'surpresseur')!;
+    const zone = boosterZones(ref).get(booster.id)!;
+    const hount = ref.nodes.filter((n) => n.secteur === 'hount estrete');
+    expect(hount.every((n) => zone.has(n.id))).toBe(true);
+    expect(zone.has(ref.nodes.find((n) => n.nom === '122')!.id)).toBe(false);
   });
 });

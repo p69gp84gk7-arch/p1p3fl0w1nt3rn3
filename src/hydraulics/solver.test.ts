@@ -264,7 +264,7 @@ describe('solveur', () => {
     expect(solve(net).totals.debit_total_m3h).toBeCloseTo(7, 6);
   });
 
-  it('salle des machines à l’arrêt / surpresseur à l’arrêt (by-pass)', () => {
+  it('salle des machines à l’arrêt / surpresseur à l’arrêt (pas de by-pass)', () => {
     const net = base();
     net.nodes.push(
       makeNode('salle_machines', 45, 6, net.params, { id: 'SM', altitude_m: 1000, pression_consigne_bar: 30 }),
@@ -275,9 +275,11 @@ describe('solveur', () => {
     const on = solve(net);
     expect(on.nodes.B.pression_bar).toBeCloseTo(40, 6);
     net.nodes[1].en_marche = false;
-    const bypass = solve(net);
-    expect(bypass.nodes.B.pression_bar).toBeLessThan(30);
-    expect(bypass.nodes.E.debit_m3h).toBeCloseTo(10, 6);
+    const stopped = solve(net); // booster arrêté : la ligne en aval n'est pas alimentée
+    expect(stopped.nodes.E.statut).toBe('isole');
+    expect(stopped.nodes.B.messages.join(' ')).toMatch(/arrêt/);
+    expect(stopped.nodes.B.pression_aspiration_bar).toBeCloseTo(30 - 50 * 0.0981, 1);
+    expect(stopped.totals.debit_total_m3h).toBeCloseTo(0, 6);
     net.nodes[0].en_marche = false;
     const off = solve(net);
     expect(off.nodes.E.statut).toBe('isole');
@@ -293,12 +295,29 @@ describe('solveur', () => {
     );
     net.pipes.push(makePipe('SM', 'B', spec, { id: 'C1', longueur_auto: false, longueur_m: 300 }), makePipe('B', 'E', spec, { id: 'C2', longueur_auto: false, longueur_m: 300 }));
     const dry = solve(net); // 10 bar ≈ 102 m : l'eau n'atteint pas 1300 m
-    expect(dry.nodes.B.pression_bar).toBeLessThan(0);
-    expect(dry.nodes.E.pression_bar).toBeLessThan(0);
+    expect(dry.nodes.B.pression_aspiration_bar).toBeLessThan(0);
+    expect(dry.nodes.E.statut).toBe('isole'); // pas d'eau en aval du booster
     expect(dry.nodes.B.messages.join(' ')).toMatch(/désamorcé/);
     net.nodes[0].pression_consigne_bar = 40; // ≈ 408 m : l'eau arrive, le booster repart
     const wet = solve(net);
     expect(wet.nodes.B.pression_bar).toBeCloseTo(40, 4);
     expect(wet.nodes.E.pression_bar).toBeGreaterThan(29);
+  });
+
+  it('booster désamorcé en production : débit trop fort pour l’aspiration', () => {
+    const net = base();
+    net.nodes.push(
+      makeNode('salle_machines', 45, 6, net.params, { id: 'SM', altitude_m: 1000, pression_consigne_bar: 25 }),
+      makeNode('surpresseur', 45, 6, net.params, { id: 'B', altitude_m: 1200, pression_consigne_bar: 40 }),
+      makeNode('enneigeur', 45, 6, net.params, { id: 'E', altitude_m: 1300, debit_m3h: 400 }),
+    );
+    net.pipes.push(
+      makePipe('SM', 'B', { ...spec, diametre_int_mm: 100 }, { id: 'C1', longueur_auto: false, longueur_m: 3000 }),
+      makePipe('B', 'E', spec, { id: 'C2', longueur_auto: false, longueur_m: 300 }),
+    );
+    const r = solve(net);
+    expect(r.converged).toBe(true);
+    expect(r.nodes.B.statut).toBe('erreur');
+    expect(r.nodes.E.statut).toBe('isole');
   });
 });

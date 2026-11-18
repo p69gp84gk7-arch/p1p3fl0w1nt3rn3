@@ -19,6 +19,9 @@ export type Selection = { kind: 'node' | 'pipe'; id: string } | null;
 
 export type ColorBy = 'statut' | 'pression' | 'remplissage' | 'vitesse' | 'calque' | 'diametre' | 'secteur';
 
+/** Panneau ouvert par-dessus la carte sur téléphone. */
+export type MobileSheet = null | 'affichage' | 'panneau' | 'tableaux' | 'outils';
+
 export interface Toast {
   id: number;
   text: string;
@@ -46,6 +49,10 @@ interface State {
   profileTarget: string | null;
   /** Incrémenté pour recentrer la carte sur le réseau. */
   fitToken: number;
+  /** Téléphone : panneau ouvert par-dessus la carte. */
+  mobileSheet: MobileSheet;
+  /** Mise en pression en cours (id de la station), le réseau se remplit en bleu. */
+  filling: string | null;
 
   /** Applique une modification (avec annulation). */
   commit(next: Network, label?: string): void;
@@ -93,6 +100,8 @@ export const useStore = create<State>((set, get) => ({
   bottomTab: null,
   profileTarget: null,
   fitToken: 0,
+  mobileSheet: null,
+  filling: null,
 
   commit(next) {
     const { net, past } = get();

@@ -4,6 +4,7 @@
 import { buildNetwork, defaultImportChoices, mergeKml, withPointOverrides, type KmlContent } from '../import/kmz';
 import { applyFlowTable, readFlowTable } from '../import/csv';
 import { applyMinPressures, DEFAULT_MODELES, emptyNetwork } from '../model/defaults';
+import { calibrateSource } from '../hydraulics/calage';
 import type { Network } from '../model/types';
 
 export const REFERENCE_FILES = {
@@ -13,7 +14,7 @@ export const REFERENCE_FILES = {
 
 export const REFERENCE_NAME = 'Réseau neige – référence';
 /** À incrémenter à chaque évolution du réseau de référence. */
-export const REFERENCE_VERSION = '2026-11-18.2';
+export const REFERENCE_VERSION = '2026-11-18.3';
 
 /** Construit le réseau à partir des fichiers (sans les altitudes). */
 export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Network {
@@ -75,4 +76,23 @@ export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Netw
     })),
   ];
   return out;
+}
+
+/**
+ * Calage de l'usine (une fois les altitudes connues) : 15 bar à l'arrivée du
+ * booster, réseau chargé et canons fermés (valeur relevée sur l'installation).
+ */
+export function calibrateReference(net: Network): Network {
+  const sdm = net.nodes.find((n) => n.type === 'salle_machines');
+  const booster = net.nodes.find((n) => n.type === 'surpresseur');
+  if (!sdm || !booster) return net;
+  const c = calibrateSource(net, sdm.id, booster.id, net.params.calage_pression_bar);
+  if (!c.ok) return net;
+  return {
+    ...net,
+    params: { ...net.params, calage_noeud: booster.id },
+    nodes: net.nodes.map((n) =>
+      n.id === sdm.id ? { ...n, pression_consigne_bar: c.consigne, notes: `Pression calée pour ${net.params.calage_pression_bar} bar à l’arrivée du booster (canons fermés). Débit maximal à renseigner.` } : n,
+    ),
+  };
 }

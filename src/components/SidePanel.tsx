@@ -7,6 +7,10 @@ import { COURONNES, type Couronnes, type Layer, type NetNode, type NodeType, typ
 import { NumField, Row, Section, TextField, Toggle } from './fields';
 import { BASE_LAYERS, fmt, STATUS_COLOR, STATUS_LABEL } from './display';
 import { newId } from '../model/ids';
+import { SheetHeader } from './MobileNav';
+import { calibrateSource, pressureAt, type CalageResult } from '../hydraulics/calage';
+import { staticNetwork } from '../model/scenario';
+import { pressurize, stopPressurize } from './pressurize';
 import { REFERENCE_NAME, REFERENCE_VERSION } from '../data/reference';
 
 export default function SidePanel() {
@@ -17,6 +21,9 @@ export default function SidePanel() {
   const pipe = selection?.kind === 'pipe' ? net.pipes.find((p) => p.id === selection.id) : undefined;
   return (
     <aside className="sidepanel">
+      <div className="mobile-only">
+        <SheetHeader title={node ? `${NODE_LABEL[node.type]} ${node.nom}` : pipe ? `Canalisation ${pipe.nom}` : 'Réseau & pompage'} />
+      </div>
       {tool.kind === 'draw' && <DrawSpecPicker />}
       {node ? <NodeEditor key={node.id} node={node} /> : pipe ? <PipeEditor key={pipe.id} pipe={pipe} /> : <Overview />}
     </aside>
@@ -280,6 +287,7 @@ function NodeEditor({ node }: { node: NetNode }) {
           onClick={() => {
             st().set('profileTarget', node.id);
             st().set('bottomTab', 'profil');
+            st().set('mobileSheet', 'tableaux');
             if (!st().results || st().stale) st().runCalc();
           }}
         >
@@ -675,6 +683,7 @@ function PumpingSection() {
   return (
     <Section title="Pompage">
       {!stations.length && <p className="small muted">Aucune salle des machines : ajoutez-en une avec la barre d’outils.</p>}
+      {stations.some((n) => n.type === 'salle_machines') && <CalageCard />}
       <div className="stations">
         {stations.map((n) => (
           <StationCard key={n.id} node={n} />
@@ -691,13 +700,70 @@ function livePressure(id: string, bar: number) {
   st.runCalc();
 }
 
-let animTimer: number | undefined;
+/** Calage de la pression de l'usine sur une pression relevée (réseau chargé, canons fermés). */
+function CalageCard() {
+  const net = useStore((s) => s.net);
+  const st = useStore.getState;
+  const [res, setRes] = useState<CalageResult | null>(null);
+  const sdm = net.nodes.find((n) => n.type === 'salle_machines')!;
+  const boosters = net.nodes.filter((n) => isRegulator(n.type));
+  const targetId = net.params.calage_noeud && net.nodes.some((n) => n.id === net.params.calage_noeud) ? net.params.calage_noeud : boosters[0]?.id ?? '';
+  const candidates = [...boosters, ...net.nodes.filter((n) => !isRegulator(n.type) && n.type !== 'salle_machines' && n.type !== 'jonction').sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { numeric: true }))];
+  const setParam = (p: Partial<typeof net.params>) => {
+    st().commit({ ...st().net, params: { ...st().net.params, ...p } });
+    setRes(null);
+  };
+  const compute = () => targetId && setRes(calibrateSource(st().net, sdm.id, targetId, net.params.calage_pression_bar, Math.max(200, net.params.pression_max_curseur_bar)));
+  const target = net.nodes.find((n) => n.id === targetId);
+  return (
+    <details className="calage" open>
+      <summary>⚙ Calage de la pression (réseau chargé, canons fermés)</summary>
+      <p className="small muted">Indiquez une pression relevée sur l’installation, canons fermés : l’application recalcule la pression de refoulement de l’usine.</p>
+      <Row label="Pression relevée">
+        <NumField value={net.params.calage_pression_bar} unit="bar" digits={1} onChange={(v) => setParam({ calage_pression_bar: v })} />
+      </Row>
+      <Row label="À l’arrivée de">
+        <select value={targetId} onChange={(e) => setParam({ calage_noeud: e.target.value })}>
+          {candidates.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.nom || n.id} ({NODE_LABEL[n.type].toLowerCase()}, {fmt(n.altitude_m, 0)} m)
+            </option>
+          ))}
+        </select>
+      </Row>
+      <div className="calage-actions">
+        <button className="btn small" onClick={compute} disabled={!targetId}>
+          Recalculer
+        </button>
+        {res && res.ok && (
+          <>
+            <span className="small">
+              Usine : <b>{fmt(res.consigne, 1)} bar</b> → {fmt(res.obtenue, 1)} bar à {target?.nom}
+            </span>
+            <button
+              className="btn small primary"
+              disabled={Math.abs(res.consigne - sdm.pression_consigne_bar) < 0.05}
+              onClick={() => {
+                st().updateNode(sdm.id, { pression_consigne_bar: res.consigne, en_marche: true });
+                st().runCalc(true);
+                st().toast(`Usine réglée à ${fmt(res.consigne, 1)} bar : ${fmt(res.obtenue, 1)} bar à l’arrivée de ${target?.nom}, canons fermés.`, 'success');
+              }}
+            >
+              Appliquer
+            </button>
+          </>
+        )}
+        {res && !res.ok && <span className="small msg">{res.message}</span>}
+      </div>
+    </details>
+  );
+}
 
 function StationCard({ node: n }: { node: NetNode }) {
   const net = useStore((s) => s.net);
   const results = useStore((s) => s.results);
   const stale = useStore((s) => s.stale);
-  const [anim, setAnim] = useState(false);
+  const filling = useStore((s) => s.filling);
   const st = useStore.getState;
   const r = results?.nodes[n.id];
   const locked = net.calques.find((l) => l.id === n.calque)?.verrouille;
@@ -706,37 +772,40 @@ function StationCard({ node: n }: { node: NetNode }) {
   const load = n.debit_max_m3h > 0 && Number.isFinite(q) ? q / n.debit_max_m3h : NaN;
   const maxBar = Math.max(net.params.pression_max_curseur_bar || 80, n.pression_consigne_bar);
   const isSdm = n.type === 'salle_machines';
+  const isBooster = n.type === 'surpresseur';
   const waterLevel = n.altitude_m + n.pression_consigne_bar / 0.0980638;
+  const anim = filling === n.id;
+  const sdm = net.nodes.find((x) => x.type === 'salle_machines');
+  // Pression d'arrivée au booster, réseau chargé et canons fermés.
+  const staticInlet = useMemo(() => (isBooster && !filling ? pressureAt(staticNetwork(net), n.id) : NaN), [isBooster, filling, net, n.id]);
 
   const setRunning = (v: boolean) => {
+    stopPressurize();
     st().updateNode(n.id, { en_marche: v });
-    st().runCalc();
+    st().runCalc(true);
   };
 
-  /** Montée en pression progressive depuis 0 bar, en montrant le remplissage. */
-  const pressurize = () => {
-    window.clearInterval(animTimer);
-    const target = n.pression_consigne_bar > 0 ? n.pression_consigne_bar : 60;
-    const before = st().net;
-    st().commit({ ...before, nodes: before.nodes.map((x) => (x.id === n.id ? { ...x, en_marche: true } : x)) });
-    st().set('colorBy', 'remplissage');
-    setAnim(true);
-    const steps = 60;
-    let k = 0;
-    animTimer = window.setInterval(() => {
-      k += 1;
-      livePressure(n.id, Math.round(((target * k) / steps) * 10) / 10);
-      if (k >= steps) {
-        window.clearInterval(animTimer);
-        setAnim(false);
-      }
-    }, 120);
+  const start = () => {
+    if (isSdm) {
+      pressurize(n.id, 0, n.pression_consigne_bar > 0 ? n.pression_consigne_bar : 60, () =>
+        st().toast(`Réseau chargé à ${fmt(n.pression_consigne_bar, 1)} bar en sortie d’usine (canons fermés).`, 'success'),
+      );
+      return;
+    }
+    // Booster : il faut que l'eau lui arrive.
+    if (!sdm || sdm.en_marche === false) return st().toast('Mettez d’abord l’usine en marche.', 'error');
+    const Pin = pressureAt(staticNetwork(st().net), n.id);
+    if (!(Pin >= 0)) {
+      const need = calibrateSource(st().net, sdm.id, n.id, 0.5);
+      return st().toast(`Booster désamorcé : l’eau ne lui arrive pas. Il faut au moins ${fmt(need.consigne, 1)} bar à l’usine.`, 'error');
+    }
+    pressurize(n.id, Math.min(Pin, n.pression_consigne_bar), n.pression_consigne_bar, () =>
+      st().toast(`Ligne du booster chargée à ${fmt(n.pression_consigne_bar, 1)} bar.`, 'success'),
+    );
   };
-  const stop = () => {
-    window.clearInterval(animTimer);
-    setAnim(false);
-  };
-  useEffect(() => () => window.clearInterval(animTimer), []);
+  useEffect(() => () => {
+    if (useStore.getState().filling === n.id) stopPressurize();
+  }, [n.id]);
 
   return (
     <div className={`station ${!running ? 'st-off' : r ? `st-${r.statut}` : ''}`}>
@@ -749,13 +818,29 @@ function StationCard({ node: n }: { node: NetNode }) {
         </span>
       </div>
       <div className="station-run">
-        <Toggle checked={running} disabled={locked} onChange={setRunning} label={running ? (isSdm ? 'Pompage en marche' : 'En service') : isSdm ? 'Pompage arrêté' : 'À l’arrêt (by-pass)'} />
-        {isSdm && (
-          <button className={`btn small ${anim ? '' : 'primary'}`} disabled={locked} onClick={anim ? stop : pressurize} title="Fait monter la pression de 0 jusqu’à la consigne en affichant le remplissage des canalisations">
+        <Toggle
+          checked={running}
+          disabled={locked}
+          onChange={setRunning}
+          label={running ? (isSdm ? 'Pompage en marche' : 'En service') : isSdm ? 'Pompage arrêté' : isBooster ? 'Arrêté (ligne non alimentée)' : 'Hors service'}
+        />
+        {(isSdm || isBooster) && (
+          <button
+            className={`btn small ${anim ? '' : 'primary'}`}
+            disabled={locked || (!!filling && !anim)}
+            onClick={anim ? stopPressurize : start}
+            title={isSdm ? 'Fait monter la pression depuis 0 bar, canons fermés : on voit les canalisations se remplir' : 'Démarre le booster et fait monter la pression de sa ligne, canons fermés'}
+          >
             {anim ? '■ Stop' : '▶ Mise en pression'}
           </button>
         )}
       </div>
+      {isBooster && Number.isFinite(staticInlet) && (
+        <div className={`small ${staticInlet < 0 ? 'msg' : ''}`}>
+          Arrivée canons fermés : <b>{fmt(staticInlet, 1)} bar</b>
+          {staticInlet < 0 && ' — désamorcé, augmentez la pression de l’usine'}
+        </div>
+      )}
       <Row label="Pression de refoulement" hint="Pression maintenue en sortie (variateur / régulation)">
         <NumField value={n.pression_consigne_bar} unit="bar" digits={1} disabled={locked} onChange={(v) => { st().updateNode(n.id, { pression_consigne_bar: v }); st().runCalc(); }} />
       </Row>
@@ -768,7 +853,7 @@ function StationCard({ node: n }: { node: NetNode }) {
           value={n.pression_consigne_bar}
           disabled={locked || !running}
           onPointerDown={() => {
-            stop();
+            stopPressurize();
             st().commit(st().net);
           }}
           onChange={(e) => livePressure(n.id, Number(e.target.value))}

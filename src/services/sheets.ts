@@ -255,6 +255,8 @@ export function resultsToRows(net: Network, res: SolveResult): Record<string, Ro
         charge_m: r && Number.isFinite(r.charge_m) ? round(r.charge_m, 2) : '',
         pression_bar: r && Number.isFinite(r.pression_bar) ? round(r.pression_bar, 2) : '',
         debit_m3h: r ? round(r.debit_m3h, 2) : '',
+        vitesse_arrivee_m_s: r && Number.isFinite(r.vitesse_arrivee_m_s) ? round(r.vitesse_arrivee_m_s, 3) : '',
+        debit_arrivee_m3h: r ? round(r.debit_arrivee_m3h, 2) : '',
         pression_min_bar: n.pression_min_bar,
         statut: r ? [r.statut, ...r.messages].join(' – ') : '',
       };

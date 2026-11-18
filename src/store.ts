@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { emptyNetwork, DEFAULT_PIPE_SPEC } from './model/defaults';
+import { DEFAULT_PIPE_SPEC, emptyNetwork } from './model/defaults';
+import { referenceNetwork } from './data/referenceNetwork';
 import type { Network, NetNode, NodeType, Pipe, PipeSpec, SolveResult } from './model/types';
 import { applyScenario, staticNetwork } from './model/scenario';
 import { solve } from './hydraulics/solver';
@@ -37,6 +38,8 @@ interface State {
   scenario: string;
   colorBy: ColorBy;
   showLabels: boolean;
+  /** Affiche pression / vitesse à côté des éléments sur la carte. */
+  showResults: boolean;
   settings: Settings;
   toasts: Toast[];
   past: Network[];
@@ -65,10 +68,15 @@ interface State {
   loadScenario(nom: string): void;
   updateSettings(p: Partial<Settings>): void;
   fillAltitudes(nodeIds?: string[], withVertices?: boolean): Promise<void>;
+  /** Charge le réseau de référence de la station (fichiers intégrés). */
+  loadReference(): Promise<void>;
 }
 
 let toastId = 0;
-const initialNet = loadLocalNetwork() ?? emptyNetwork();
+const savedNet = loadLocalNetwork();
+const initialNet = savedNet ?? emptyNetwork();
+/** Aucun réseau enregistré sur cet appareil : on charge celui de la station. */
+export const firstVisit = savedNet === null;
 
 export const useStore = create<State>((set, get) => ({
   net: initialNet,
@@ -80,6 +88,7 @@ export const useStore = create<State>((set, get) => ({
   drawSpec: DEFAULT_PIPE_SPEC,
   scenario: '',
   colorBy: 'statut',
+  showResults: true,
   showLabels: false,
   settings: loadSettings(),
   toasts: [],
@@ -169,6 +178,16 @@ export const useStore = create<State>((set, get) => ({
     const s = { ...get().settings, ...p };
     saveSettings(s);
     set({ settings: s });
+  },
+  async loadReference() {
+    set({ busy: 'Chargement du réseau de la station…' });
+    try {
+      get().replaceNetwork(await referenceNetwork());
+    } catch (e) {
+      get().toast(`Réseau de référence indisponible : ${(e as Error).message}`, 'error');
+    } finally {
+      set({ busy: null });
+    }
   },
   async fillAltitudes(nodeIds, withVertices = false) {
     const { net, settings } = get();

@@ -366,11 +366,11 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
     const msgs: string[] = [];
     const isGun = isConsumer(n.type) && n.actif;
     if (closedValves.has(n.id) && !excludedLayers.has(n.calque)) {
-      result.nodes[n.id] = { id: n.id, charge_m: NaN, pression_bar: NaN, debit_m3h: 0, statut: 'ok', messages: ['Vanne fermée.'] };
+      result.nodes[n.id] = { id: n.id, charge_m: NaN, pression_bar: NaN, debit_m3h: 0, statut: 'ok', messages: ['Vanne fermée.'], vitesse_arrivee_m_s: NaN, debit_arrivee_m3h: 0 };
       continue;
     }
     if (excludedLayers.has(n.calque)) {
-      result.nodes[n.id] = { id: n.id, charge_m: NaN, pression_bar: NaN, debit_m3h: 0, statut: 'isole', messages: ['Calque non inclus dans le calcul.'] };
+      result.nodes[n.id] = { id: n.id, charge_m: NaN, pression_bar: NaN, debit_m3h: 0, statut: 'isole', messages: ['Calque non inclus dans le calcul.'], vitesse_arrivee_m_s: NaN, debit_arrivee_m3h: 0 };
       continue;
     }
     if (hd === undefined) {
@@ -381,6 +381,8 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
         debit_m3h: 0,
         statut: 'isole',
         messages: [isGun ? "Non alimenté : aucun chemin ouvert jusqu'à une salle des machines." : 'Non relié au réseau alimenté.'],
+        vitesse_arrivee_m_s: NaN,
+        debit_arrivee_m3h: 0,
       };
       if (isGun) result.totals.enneigeurs_actifs += 1;
       continue;
@@ -409,7 +411,7 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>):
       statut = 'erreur';
       msgs.push('Pression négative : risque de dépression / cavitation.');
     }
-    const r: NodeResult = { id: n.id, charge_m: hd, pression_bar: P, debit_m3h: q, statut, messages: msgs };
+    const r: NodeResult = { id: n.id, charge_m: hd, pression_bar: P, debit_m3h: q, statut, messages: msgs, vitesse_arrivee_m_s: NaN, debit_arrivee_m3h: 0 };
     const bi = boosterInlet.get(n.id);
     if (bi !== undefined) {
       const Pin = (H[bi] - n.altitude_m) * barPerM;
@@ -537,6 +539,19 @@ export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
     if (next.size === pass.size && [...next].every((x) => pass.has(x))) break;
     pass = next;
     r = solveOnce(net, opts, pass);
+  }
+  // Vitesse et débit d'arrivée à chaque nœud (canalisations qui l'alimentent).
+  for (const p of net.pipes) {
+    const pr = r.pipes[p.id];
+    if (!pr || !(Math.abs(pr.debit_m3h) > 1e-9)) continue;
+    const dest = r.nodes[pr.debit_m3h > 0 ? p.aval : p.amont];
+    if (!dest) continue;
+    dest.debit_arrivee_m3h += Math.abs(pr.debit_m3h);
+    dest.vitesse_arrivee_m_s = Number.isFinite(dest.vitesse_arrivee_m_s) ? Math.max(dest.vitesse_arrivee_m_s, pr.vitesse_m_s) : pr.vitesse_m_s;
+  }
+  for (const n of net.nodes) {
+    const nr = r.nodes[n.id];
+    if (nr && !Number.isFinite(nr.vitesse_arrivee_m_s) && Number.isFinite(nr.pression_bar)) nr.vitesse_arrivee_m_s = 0;
   }
   for (const id of pass) {
     const n = regulators.find((x) => x.id === id)!;

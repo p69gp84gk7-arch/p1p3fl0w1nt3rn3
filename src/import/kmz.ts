@@ -221,7 +221,7 @@ export function specForDn(dn: number | null, catalogue: PipeSpec[], fallback: Pi
 
 export interface ImportOptions {
   /** Type de nœud par catégorie de points (dossier · icône). */
-  categoryTypes: Record<string, NodeType | 'ignorer'>;
+  categoryTypes: Record<string, ImportType>;
   /** Modèle d'enneigeur par catégorie (vide = modèle par défaut). */
   categoryModels?: Record<string, string>;
   /** Calque d'affectation des nouveaux éléments. */
@@ -403,4 +403,65 @@ function dedupe(pts: GeoPoint[]): GeoPoint[] {
     out.push(p);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Réglages d'import par défaut (partagés par la fenêtre d'import et le
+// script de génération du réseau de référence)
+// ---------------------------------------------------------------------------
+
+export type ImportType = NodeType | 'ignorer';
+
+/** Type proposé pour une catégorie de points (dossier · icône). */
+export function defaultCategoryType(kml: KmlContent, category: string): ImportType {
+  const pts = kml.points.filter((p) => p.category === category);
+  const numeric = pts.filter((p) => /^\d+\s*[a-z]?$/i.test(p.name.trim())).length;
+  if (numeric >= pts.length / 2) return 'enneigeur';
+  const g = guessNodeType(category);
+  return g === 'enneigeur' ? (/canon|enneig/i.test(category) ? 'enneigeur' : 'jonction') : g;
+}
+
+/** Modèle proposé à partir de l'icône embarquée dans le KMZ (« files/revo.png » → « revo »). */
+export function defaultCategoryModel(icon: string): string {
+  return icon.startsWith('files/') ? iconName(icon) : '';
+}
+
+/** Types reconnus point par point d'après leur nom (« usine », « booster »…). */
+export function defaultPointTypes(kml: KmlContent): Record<number, ImportType> {
+  const o: Record<number, ImportType> = {};
+  kml.points.forEach((p, i) => {
+    const g = guessNodeType(p.name);
+    if (g !== 'enneigeur') o[i] = g;
+  });
+  return o;
+}
+
+/** Applique les surcharges point par point en créant des catégories dédiées. */
+export function withPointOverrides(
+  kml: KmlContent,
+  catTypes: Record<string, ImportType>,
+  catModels: Record<string, string>,
+  pointTypes: Record<number, ImportType>,
+) {
+  const kml2: KmlContent = { ...kml, points: kml.points.map((p, i) => ({ ...p, category: pointTypes[i] ? `${p.category}#${i}` : p.category })) };
+  const categoryTypes: Record<string, ImportType> = { ...catTypes };
+  const categoryModels: Record<string, string> = { ...catModels };
+  kml.points.forEach((p, i) => {
+    if (pointTypes[i]) {
+      categoryTypes[`${p.category}#${i}`] = pointTypes[i];
+      categoryModels[`${p.category}#${i}`] = catModels[p.category];
+    }
+  });
+  return { kml: kml2, categoryTypes, categoryModels };
+}
+
+/** Réglages automatiques complets pour un ensemble de fichiers. */
+export function defaultImportChoices(kml: KmlContent) {
+  const cats = new Map<string, string>();
+  kml.points.forEach((p) => cats.has(p.category) || cats.set(p.category, p.icon));
+  return {
+    catTypes: Object.fromEntries([...cats.keys()].map((c) => [c, defaultCategoryType(kml, c)])) as Record<string, ImportType>,
+    catModels: Object.fromEntries([...cats.entries()].map(([c, icon]) => [c, defaultCategoryModel(icon)])) as Record<string, string>,
+    pointTypes: defaultPointTypes(kml),
+  };
 }

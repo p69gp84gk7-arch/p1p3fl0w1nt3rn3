@@ -46,6 +46,9 @@ describe('solveur', () => {
     expect(r.nodes.E.pression_bar).toBeCloseTo(P, 4);
     expect(r.nodes.SM.debit_m3h).toBeCloseTo(36, 6);
     expect(r.nodes.E.statut).toBe('ok');
+    // vitesse d'arrivée au regard = vitesse dans la canalisation qui l'alimente
+    expect(r.nodes.E.vitesse_arrivee_m_s).toBeCloseTo(V, 6);
+    expect(r.nodes.E.debit_arrivee_m3h).toBeCloseTo(36, 6);
     // ~ 40 bar - 9.8 bar de dénivelé - pertes
     expect(P).toBeGreaterThan(29);
     expect(P).toBeLessThan(30.3);

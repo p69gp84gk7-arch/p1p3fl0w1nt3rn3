@@ -95,6 +95,15 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
           {menu === 'fichier' && (
             <div className="menu-pop" onMouseLeave={() => setMenu(null)} onClick={() => setMenu(null)}>
               <button onClick={() => openDialog('import')}>📥 Importer KMZ / CSV / JSON…</button>
+              <button
+                onClick={() => {
+                  if (!net.nodes.length || confirm('Remplacer le réseau affiché par le réseau de référence de la station (fichiers intégrés) ?')) {
+                    void st().loadReference();
+                  }
+                }}
+              >
+                ⛷ Recharger le réseau de référence
+              </button>
               <hr />
               <button onClick={() => sheets('load')}>☁️ Ouvrir depuis Google Sheets</button>
               <button onClick={() => sheets('save')}>💾 Enregistrer dans Google Sheets</button>

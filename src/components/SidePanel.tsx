@@ -95,6 +95,11 @@ function NodeEditor({ node }: { node: NetNode }) {
             ) : null}
             <StatusBadge statut={r.statut} />
           </div>
+          {Number.isFinite(r.vitesse_arrivee_m_s) && (
+            <div className="small">
+              Vitesse de l’eau à l’arrivée : <b>{fmt(r.vitesse_arrivee_m_s, 2)} m/s</b> ({fmt(r.debit_arrivee_m3h, 1)} m³/h)
+            </div>
+          )}
           {r.pression_aspiration_bar !== undefined && <div className="small">Pression à l’entrée : {fmt(r.pression_aspiration_bar, 1)} bar</div>}
           <div className="small muted">Charge : {fmt(r.charge_m, 1)} m</div>
           {r.messages.map((m, i) => (
@@ -512,6 +517,7 @@ function Overview() {
   const net = useStore((s) => s.net);
   const colorBy = useStore((s) => s.colorBy);
   const showLabels = useStore((s) => s.showLabels);
+  const showResults = useStore((s) => s.showResults);
   const settings = useStore((s) => s.settings);
   const results = useStore((s) => s.results);
   const st = useStore.getState;
@@ -543,6 +549,8 @@ function Overview() {
           </div>
         </div>
       </Section>
+
+      <PumpingSection />
 
       <LayersManager />
 
@@ -584,6 +592,9 @@ function Overview() {
         </Row>
         <Row label="Noms des éléments">
           <Toggle checked={showLabels} onChange={(v) => st().set('showLabels', v)} />
+        </Row>
+        <Row label="Pression / vitesse sur la carte">
+          <Toggle checked={showResults} onChange={(v) => st().set('showResults', v)} />
         </Row>
       </Section>
 
@@ -686,6 +697,73 @@ function LayersManager() {
       <p className="small muted">
         Les éléments ajoutés vont dans le calque surligné. Σ = pris en compte dans le calcul : activez un calque projet pour simuler son impact.
       </p>
+    </Section>
+  );
+}
+
+/** Réglage des stations de pompage : usine(s), surpresseurs, réducteurs. */
+function PumpingSection() {
+  const net = useStore((s) => s.net);
+  const results = useStore((s) => s.results);
+  const stale = useStore((s) => s.stale);
+  const st = useStore.getState;
+  const stations = net.nodes.filter((n) => n.type === 'salle_machines' || isRegulator(n.type));
+  const order = { salle_machines: 0, surpresseur: 1, reducteur: 2 } as Record<string, number>;
+  stations.sort((a, b) => order[a.type] - order[b.type]);
+  return (
+    <Section title="Pompage">
+      {!stations.length && <p className="small muted">Aucune salle des machines : ajoutez-en une avec la barre d’outils.</p>}
+      <div className="stations">
+        {stations.map((n) => {
+          const r = results?.nodes[n.id];
+          const locked = net.calques.find((l) => l.id === n.calque)?.verrouille;
+          const q = r && Number.isFinite(r.pression_bar) ? r.debit_m3h : NaN;
+          const load = n.debit_max_m3h > 0 && Number.isFinite(q) ? q / n.debit_max_m3h : NaN;
+          return (
+            <div key={n.id} className={`station ${r ? `st-${r.statut}` : ''}`}>
+              <div className="station-head">
+                <button className="linklike" onClick={() => st().setSelection({ kind: 'node', id: n.id })}>
+                  <b>{n.nom || n.id}</b>
+                </button>
+                <span className="muted small">
+                  {NODE_LABEL[n.type]} · {fmt(n.altitude_m, 0)} m
+                </span>
+              </div>
+              <Row label="Pression de refoulement" hint="Pression maintenue en sortie (variateur / régulation)">
+                <NumField value={n.pression_consigne_bar} unit="bar" digits={1} disabled={locked} onChange={(v) => st().updateNode(n.id, { pression_consigne_bar: v })} />
+              </Row>
+              {n.type !== 'reducteur' && (
+                <Row label="Débit maximal">
+                  <NumField value={n.debit_max_m3h} unit="m³/h" digits={0} disabled={locked} onChange={(v) => st().updateNode(n.id, { debit_max_m3h: v })} />
+                </Row>
+              )}
+              {r && Number.isFinite(q) && (
+                <div className={`station-result ${stale ? 'is-stale' : ''}`}>
+                  <div className="small">
+                    Débit calculé <b>{fmt(q, 0)} m³/h</b>
+                    {Number.isFinite(load) && <> · {fmt(load * 100, 0)} % du maximum</>}
+                  </div>
+                  {Number.isFinite(load) && (
+                    <div className="gauge">
+                      <i style={{ width: `${Math.min(load, 1) * 100}%`, background: load > 1 ? STATUS_COLOR.erreur : load > 0.9 ? STATUS_COLOR.alerte : STATUS_COLOR.ok }} />
+                    </div>
+                  )}
+                  {r.pression_aspiration_bar !== undefined && (
+                    <div className="small">
+                      Pression d’arrivée {fmt(r.pression_aspiration_bar, 1)} bar → refoulement {fmt(r.pression_bar, 1)} bar
+                    </div>
+                  )}
+                  {r.messages.map((m, i) => (
+                    <div key={i} className="small msg">
+                      {m}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </Section>
   );
 }

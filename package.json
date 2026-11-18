@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "reseau:generer": "NODE_USE_ENV_PROXY=1 vite-node scripts/generer-reseau-reference.ts"
   },
   "dependencies": {
     "jszip": "^3.10.1",
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.17",
+    "@types/node": "^22.15.21",
     "@types/react": "^18.3.20",
     "@types/react-dom": "^18.3.6",
     "@vitejs/plugin-react": "^4.4.1",

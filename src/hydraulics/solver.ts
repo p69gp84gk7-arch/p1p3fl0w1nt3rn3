@@ -48,6 +48,13 @@ export interface SolverOptions {
   accuracy?: number;
   /** Force le solveur linéaire (tests). */
   linear?: 'dense' | 'cg' | 'auto';
+  /**
+   * Comportement réel des boosters : un booster dont la pression d'arrivée
+   * devient négative se désamorce et ne laisse plus passer l'eau.
+   * Par défaut (mode simulateur), il continue de fonctionner et l'anomalie
+   * est seulement signalée, pour savoir ce que l'on peut garder en marche.
+   */
+  realistic?: boolean;
 }
 
 interface LinkCalc {
@@ -435,10 +442,6 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>, 
       const Pin = (H[bi] - n.altitude_m) * barPerM;
       r.pression_aspiration_bar = Pin;
       r.debit_m3h = demand[bi] * 3600;
-      if (Pin < 0) {
-        r.statut = 'erreur';
-        msgs.push(`Pression d'entrée négative (${Pin.toFixed(1)} bar).`);
-      }
       if (n.debit_max_m3h > 0 && r.debit_m3h > n.debit_max_m3h) {
         if (r.statut === 'ok') r.statut = 'alerte';
         msgs.push(`Débit ${r.debit_m3h.toFixed(0)} m³/h supérieur à la capacité ${n.debit_max_m3h} m³/h.`);
@@ -610,12 +613,12 @@ export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
       let next: BoosterState = s;
       if (s === 'actif') {
         const Pin = res?.pression_aspiration_bar;
-        if (Pin === undefined || !Number.isFinite(Pin)) next = Number.isFinite(res?.pression_bar) ? s : 'bloque';
-        else if (Pin < 0) next = 'bloque';
+        if (Pin === undefined || !Number.isFinite(Pin)) next = Number.isFinite(res?.pression_bar) || !opts.realistic ? s : 'bloque';
+        else if (Pin < 0 && opts.realistic) next = 'bloque';
         else if (Pin > set + tol) next = 'bypass';
       } else if (s === 'bypass') {
         const P = res?.pression_bar ?? NaN;
-        if (!(P >= 0)) next = 'bloque';
+        if (!(P >= 0) && opts.realistic) next = 'bloque';
         else if (P < set - tol) next = 'actif';
       } else if (inletPressure(b, r) >= 0) {
         const k = (reopened.get(b.id) ?? 0) + 1;
@@ -683,6 +686,11 @@ export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
       }
     } else if (s === 'bypass') {
       res.messages.push('Booster en by-pass : la pression d’arrivée dépasse déjà la consigne.');
+    } else if (res.pression_aspiration_bar !== undefined && res.pression_aspiration_bar < 0) {
+      res.statut = 'erreur';
+      res.messages.push(
+        `Pression d’arrivée négative (${res.pression_aspiration_bar.toFixed(1).replace('.', ',')} bar) : en réalité le booster se désamorcerait. Réduisez le nombre de canons en marche ou augmentez la pression de l’usine.`,
+      );
     }
   }
   for (const n of net.nodes) {
@@ -754,7 +762,9 @@ export function pipeProfile(p: Pipe, nodes: Map<string, NetNode>): ProfilePoint[
   // mise à l'échelle sur la longueur hydraulique si saisie manuellement
   const Lh = pipeLength(p, nodes);
   const Lg = s[s.length - 1];
-  const k = Lg > 0 ? Lh / Lg : 1;
+  // Tracé de longueur nulle (points confondus) : longueur saisie répartie uniformément.
+  if (!(Lg > 0)) return pts.map((pt, i) => ({ s: (Lh * i) / Math.max(pts.length - 1, 1), z: z[i], lat: pt.lat, lon: pt.lon }));
+  const k = Lh / Lg;
   return pts.map((pt, i) => ({ s: s[i] * k, z: z[i], lat: pt.lat, lon: pt.lon }));
 }
 

@@ -18,6 +18,7 @@ export const DEFAULT_PARAMS: Params = {
 };
 
 export const DEFAULT_CATALOGUE: PipeSpec[] = [
+  { ref: 'FD60-C64', materiau: 'Fonte ductile', dn: 60, pn_bar: 64, diametre_int_mm: 61, rugosite_mm: 0.1 },
   { ref: 'FD80-C64', materiau: 'Fonte ductile', dn: 80, pn_bar: 64, diametre_int_mm: 81, rugosite_mm: 0.1 },
   { ref: 'FD100-C64', materiau: 'Fonte ductile', dn: 100, pn_bar: 64, diametre_int_mm: 101, rugosite_mm: 0.1 },
   { ref: 'FD125-C64', materiau: 'Fonte ductile', dn: 125, pn_bar: 64, diametre_int_mm: 126, rugosite_mm: 0.1 },
@@ -28,14 +29,18 @@ export const DEFAULT_CATALOGUE: PipeSpec[] = [
   { ref: 'FD100-C100', materiau: 'Fonte ductile', dn: 100, pn_bar: 100, diametre_int_mm: 99, rugosite_mm: 0.1 },
   { ref: 'FD150-C100', materiau: 'Fonte ductile', dn: 150, pn_bar: 100, diametre_int_mm: 148, rugosite_mm: 0.1 },
   { ref: 'FD200-C100', materiau: 'Fonte ductile', dn: 200, pn_bar: 100, diametre_int_mm: 198, rugosite_mm: 0.1 },
-  { ref: 'AC80', materiau: 'Acier', dn: 80, pn_bar: 100, diametre_int_mm: 77.9, rugosite_mm: 0.05 },
-  { ref: 'AC100', materiau: 'Acier', dn: 100, pn_bar: 100, diametre_int_mm: 102.3, rugosite_mm: 0.05 },
-  { ref: 'AC125', materiau: 'Acier', dn: 125, pn_bar: 100, diametre_int_mm: 128.2, rugosite_mm: 0.05 },
-  { ref: 'AC150', materiau: 'Acier', dn: 150, pn_bar: 100, diametre_int_mm: 154.1, rugosite_mm: 0.05 },
-  { ref: 'AC200', materiau: 'Acier', dn: 200, pn_bar: 100, diametre_int_mm: 202.7, rugosite_mm: 0.05 },
-  { ref: 'AC250', materiau: 'Acier', dn: 250, pn_bar: 100, diametre_int_mm: 254.5, rugosite_mm: 0.05 },
-  { ref: 'AC300', materiau: 'Acier', dn: 300, pn_bar: 100, diametre_int_mm: 303.3, rugosite_mm: 0.05 },
+  { ref: 'AC50 (2")', materiau: 'Acier', dn: 50, pn_bar: 100, diametre_int_mm: 52.5, rugosite_mm: 0.05 },
+  { ref: 'AC65 (2"1/2)', materiau: 'Acier', dn: 65, pn_bar: 100, diametre_int_mm: 62.7, rugosite_mm: 0.05 },
+  { ref: 'AC80 (3")', materiau: 'Acier', dn: 80, pn_bar: 100, diametre_int_mm: 77.9, rugosite_mm: 0.05 },
+  { ref: 'AC100 (4")', materiau: 'Acier', dn: 100, pn_bar: 100, diametre_int_mm: 102.3, rugosite_mm: 0.05 },
+  { ref: 'AC125 (5")', materiau: 'Acier', dn: 125, pn_bar: 100, diametre_int_mm: 128.2, rugosite_mm: 0.05 },
+  { ref: 'AC150 (6")', materiau: 'Acier', dn: 150, pn_bar: 100, diametre_int_mm: 154.1, rugosite_mm: 0.05 },
+  { ref: 'AC200 (8")', materiau: 'Acier', dn: 200, pn_bar: 100, diametre_int_mm: 202.7, rugosite_mm: 0.05 },
+  { ref: 'AC250 (10")', materiau: 'Acier', dn: 250, pn_bar: 100, diametre_int_mm: 254.5, rugosite_mm: 0.05 },
+  { ref: 'AC300 (12")', materiau: 'Acier', dn: 300, pn_bar: 100, diametre_int_mm: 303.3, rugosite_mm: 0.05 },
+  { ref: 'PE50-PN16', materiau: 'PEHD', dn: 50, pn_bar: 16, diametre_int_mm: 40.8, rugosite_mm: 0.01 },
   { ref: 'PE63-PN16', materiau: 'PEHD', dn: 63, pn_bar: 16, diametre_int_mm: 51.4, rugosite_mm: 0.01 },
+  { ref: 'PE75-PN16', materiau: 'PEHD', dn: 75, pn_bar: 16, diametre_int_mm: 61.4, rugosite_mm: 0.01 },
   { ref: 'PE90-PN16', materiau: 'PEHD', dn: 90, pn_bar: 16, diametre_int_mm: 73.6, rugosite_mm: 0.01 },
   { ref: 'PE110-PN16', materiau: 'PEHD', dn: 110, pn_bar: 16, diametre_int_mm: 90, rugosite_mm: 0.01 },
   { ref: 'PE160-PN16', materiau: 'PEHD', dn: 160, pn_bar: 16, diametre_int_mm: 130.8, rugosite_mm: 0.01 },
@@ -141,11 +146,12 @@ export function makeNode(type: NodeType, lat: number, lon: number, params: Param
     air: 0,
     priorite: '',
     en_marche: true,
+    debit_remplissage_m3h: type === 'salle_machines' ? 150 : type === 'surpresseur' ? 60 : 0,
     ...extra,
   };
 }
 
-export const DEFAULT_PIPE_SPEC = DEFAULT_CATALOGUE[3]; // Fonte DN150 C64
+export const DEFAULT_PIPE_SPEC = DEFAULT_CATALOGUE.find((c) => c.ref === 'FD150-C64')!; // Fonte DN150 C64
 
 export function makePipe(amont: string, aval: string, spec: PipeSpec = DEFAULT_PIPE_SPEC, extra: Partial<Pipe> = {}): Pipe {
   return {

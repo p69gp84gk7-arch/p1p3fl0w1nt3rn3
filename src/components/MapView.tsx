@@ -8,6 +8,7 @@ import type { GeoPoint, NetNode, Network, Pipe } from '../model/types';
 import { BASE_LAYERS, binColor, categoryColor, DN_BINS, DRY_COLOR, WATER_COLOR, fmt, nodeIcon, PISTES_OVERLAY, pipeWeight, PRESSURE_BINS, STATUS_COLOR, VELOCITY_BINS } from './display';
 import { nodeBubble, pipeLabel } from './labels';
 import { boosterZones } from '../hydraulics/zones';
+import { formatDuree } from '../hydraulics/remplissage';
 import { pipeProfile } from '../hydraulics/solver';
 import { isConsumer } from '../model/defaults';
 
@@ -83,7 +84,8 @@ function NetworkLayers() {
   const tool = useStore((s) => s.tool);
   const colorBy = useStore((s) => s.colorBy);
   const filling = useStore((s) => s.filling);
-  const fillLevels = useStore((s) => s.fillLevels);
+  const fillSim = useStore((s) => s.fillSim);
+  const fillTime = useStore((s) => s.fillTime);
   const settings = useStore((s) => s.settings);
   const activeLayer = useStore((s) => s.activeLayer);
   const drawSpec = useStore((s) => s.drawSpec);
@@ -289,55 +291,49 @@ function NetworkLayers() {
     }
   };
 
-  // Zones alimentées uniquement par un booster (remplissage par le bas, information « attente booster »).
+  // Zones alimentées uniquement par un booster (information « attente du booster »).
   const zoneOf = useMemo(() => {
     const m = new Map<string, string>();
     if (colorBy !== 'remplissage' && !filling) return m;
     for (const [b, zone] of boosterZones(net)) for (const id of zone) m.set(id, b);
     return m;
   }, [net, colorBy, filling]);
-  const levelFor = (nodeId: string): number | undefined => {
-    const b = zoneOf.get(nodeId);
-    return b !== undefined ? fillLevels[b] : undefined;
-  };
-  const pipeLevel = (p: Pipe): number | undefined => {
-    const b = zoneOf.get(p.aval) ?? zoneOf.get(p.amont);
-    return b !== undefined ? fillLevels[b] : undefined;
-  };
+  // Lecture de la simulation de remplissage en cours.
+  const simOn = !!filling && !!fillSim;
+  const simByPipe = useMemo(() => {
+    const m = new Map<string, NonNullable<typeof fillSim>['segments']>();
+    for (const sg of fillSim?.segments ?? []) (m.get(sg.pipeId) ?? m.set(sg.pipeId, []).get(sg.pipeId)!).push(sg);
+    return m;
+  }, [fillSim]);
   /** Le point est-il rempli d'eau ? */
-  const isWet = (n: NetNode, r: { pression_bar: number } | undefined) => {
-    const lvl = levelFor(n.id);
-    return !!r && r.pression_bar >= 0 && (lvl === undefined || n.altitude_m <= lvl);
-  };
+  const isWet = (n: NetNode, r: { pression_bar: number } | undefined) =>
+    simOn ? (fillSim!.nodeTime[n.id] ?? Infinity) <= fillTime : !!r && r.pression_bar >= 0;
   /** Pourquoi un point est vide (information sur les canons et canalisations). */
   const dryReason = (nodeId: string, r: { pression_bar: number } | undefined): string => {
     const b = zoneOf.get(nodeId);
-    if (b) {
-      const bn = nodes.get(b);
-      const br = showRes?.nodes[b];
-      if (bn?.en_marche === false) return 'booster arrêté';
-      if (!br || !Number.isFinite(br.pression_bar)) return 'attente du booster';
-      if (filling) return 'remplissage…';
+    const bStopped = b !== undefined && nodes.get(b)?.en_marche === false;
+    if (simOn) {
+      const tn = fillSim!.nodeTime[nodeId];
+      if (tn === undefined) return bStopped ? 'booster arrêté' : 'ne se remplit pas';
+      if (b !== undefined && fillTime < (fillSim!.boosters[b]?.depart_s ?? Infinity)) return 'attente du booster';
+      return `plein dans ${formatDuree(tn - fillTime)}`;
     }
+    if (bStopped) return 'booster arrêté';
     if (!r || !Number.isFinite(r.pression_bar)) return 'non alimenté';
     return 'au-dessus du niveau d’eau';
   };
 
   /** Mode niveau d'eau : morceaux de tracé pleins (colorés par pression) ou vides. */
   const waterSegments = (p: Pipe): { pts: [number, number][]; P: number }[] => {
+    if (simOn) return (simByPipe.get(p.id) ?? []).map((sg) => ({ pts: [sg.a, sg.b], P: sg.t <= fillTime ? 0 : -1 }));
     const r = showRes?.pipes[p.id];
     const prof = pipeProfile(p, nodes);
     if (prof.length < 2) return [];
     if (!r || !Number.isFinite(r.charge_amont_m) || !Number.isFinite(r.charge_aval_m)) {
-      return [{ pts: prof.map((q) => [q.lat, q.lon]), P: NaN }];
+      return [{ pts: prof.map((q) => [q.lat, q.lon]), P: -1 }];
     }
     const L = prof[prof.length - 1].s || 1;
-    const lvl = pipeLevel(p);
-    // Au-dessus du niveau de remplissage d'une zone booster : vide (pression ramenée à -1).
-    const P = prof.map((q) => {
-      const v = (r.charge_amont_m + ((r.charge_aval_m - r.charge_amont_m) * q.s) / L - q.z) * BAR_PER_M;
-      return lvl !== undefined && q.z > lvl ? Math.min(v, -0.001 - (q.z - lvl) * 0.001) : v;
-    });
+    const P = prof.map((q) => (r.charge_amont_m + ((r.charge_aval_m - r.charge_amont_m) * q.s) / L - q.z) * BAR_PER_M);
     const out: { pts: [number, number][]; P: number }[] = [];
     for (let i = 0; i < prof.length - 1; i++) {
       const a = prof[i];

@@ -12,6 +12,10 @@ import SettingsDialog from './components/SettingsDialog';
 import HelpDialog from './components/HelpDialog';
 import { firstVisit, useStore } from './store';
 import MobileNav from './components/MobileNav';
+import FillClock from './components/FillClock';
+import { ReferenceBanner } from './components/SidePanel';
+import { REFERENCE_NAME, REFERENCE_VERSION } from './data/reference';
+import { isReferencePristine } from './services/storage';
 import { useIsMobile } from './components/useIsMobile';
 import { deleteNode, deletePipe } from './model/edit';
 
@@ -35,7 +39,14 @@ export default function App() {
     if (isMobile && tool.kind !== 'select' && useStore.getState().mobileSheet === 'outils') useStore.getState().set('mobileSheet', null);
   }, [isMobile, tool.kind]);
   useEffect(() => {
-    if (firstVisit) void useStore.getState().loadReference();
+    const s = useStore.getState();
+    const p = s.net.params;
+    const fromReference = p.reference_version !== '' || p.nom_projet === REFERENCE_NAME;
+    if (firstVisit) void s.loadReference();
+    // Réseau de la station non modifié sur cet appareil : mise à jour automatique.
+    else if (fromReference && p.reference_version !== REFERENCE_VERSION && isReferencePristine()) {
+      void s.loadReference().then(() => useStore.getState().toast('Réseau de la station mis à jour automatiquement.', 'success'));
+    }
   }, []);
 
   return (
@@ -47,6 +58,8 @@ export default function App() {
           <MapView />
           {!empty && <MapDisplayPanel />}
           <ToolHint />
+          <FillClock />
+          <ReferenceBanner />
           {empty && !busy && <Welcome openDialog={setDialog} />}
           <BottomDrawer />
         </div>

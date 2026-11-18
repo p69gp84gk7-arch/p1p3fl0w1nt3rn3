@@ -8,6 +8,7 @@ import { applyScenario, staticNetwork } from '../model/scenario';
 import { pressureAt } from '../hydraulics/calage';
 import { allOpenNetwork } from '../hydraulics/diametres';
 import { boosterZones } from '../hydraulics/zones';
+import { simulateFilling } from '../hydraulics/remplissage';
 
 const read = (p: string) => new Uint8Array(readFileSync(`public/${p}`)).buffer;
 
@@ -81,7 +82,7 @@ describe('réseau de référence intégré', () => {
     const off = solve(staticNetwork({ ...ref, nodes: ref.nodes.map((n) => (n.id === booster.id ? { ...n, en_marche: false } : n)) }));
     expect(hount.every((n) => off.nodes[n.id].statut === 'isole')).toBe(true);
     // usine trop basse : booster désamorcé, Hount vide
-    const low = solve(staticNetwork({ ...ref, nodes: ref.nodes.map((n) => (n.id === sdm.id ? { ...n, pression_consigne_bar: 40 } : n)) }));
+    const low = solve(staticNetwork({ ...ref, nodes: ref.nodes.map((n) => (n.id === sdm.id ? { ...n, pression_consigne_bar: 40 } : n)) }), { realistic: true });
     expect(low.nodes[booster.id].messages.join(' ')).toMatch(/désamorcé/);
     expect(hount.every((n) => low.nodes[n.id].statut === 'isole')).toBe(true);
   });
@@ -120,5 +121,19 @@ describe('réseau de référence intégré', () => {
     const hount = ref.nodes.filter((n) => n.secteur === 'hount estrete');
     expect(hount.every((n) => zone.has(n.id))).toBe(true);
     expect(zone.has(ref.nodes.find((n) => n.nom === '122')!.id)).toBe(false);
+  });
+
+  it('remplissage du réseau : Hount se charge après le démarrage du booster, temps finis', async () => {
+    const ref = await referenceNetwork();
+    const sim = simulateFilling(ref);
+    const booster = ref.nodes.find((n) => n.type === 'surpresseur')!;
+    const dep = sim.boosters[booster.id].depart_s;
+    expect(Number.isFinite(dep)).toBe(true);
+    expect(sim.total_s).toBeGreaterThan(dep);
+    const hount = ref.nodes.filter((n) => n.secteur === 'hount estrete');
+    expect(hount.every((n) => sim.nodeTime[n.id] > dep)).toBe(true);
+    // booster arrêté : Hount ne se charge pas, mais le booster ne bloque pas les calculs de production
+    const off = { ...ref, nodes: ref.nodes.map((n) => (n.id === booster.id ? { ...n, en_marche: false } : n)) };
+    expect(hount.every((n) => simulateFilling(off).nodeTime[n.id] === undefined)).toBe(true);
   });
 });

@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { DEFAULT_PIPE_SPEC, emptyNetwork } from './model/defaults';
 import { referenceNetwork } from './data/referenceNetwork';
+import type { FillResult } from './hydraulics/remplissage';
 import type { Network, NetNode, NodeType, Pipe, PipeSpec, SolveResult } from './model/types';
 import { applyScenario, staticNetwork } from './model/scenario';
 import { solve } from './hydraulics/solver';
-import { loadLocalNetwork, loadSettings, saveLocalNetwork, saveSettings, type Settings } from './services/storage';
+import { loadLocalNetwork, loadSettings, saveLocalNetwork, saveSettings, setReferencePristine, type Settings } from './services/storage';
 import { fetchElevations } from './services/elevation';
 
 export type Tool =
@@ -53,8 +54,10 @@ interface State {
   mobileSheet: MobileSheet;
   /** Mise en pression en cours (id de la station), le réseau se remplit en bleu. */
   filling: string | null;
-  /** Remplissage par le bas des zones alimentées par un booster : niveau d'eau (m) par booster. */
-  fillLevels: Record<string, number>;
+  /** Dernière simulation de remplissage (temps de chargement). */
+  fillSim: FillResult | null;
+  /** Instant simulé affiché pendant la lecture du remplissage (s). */
+  fillTime: number;
 
   /** Applique une modification (avec annulation). */
   commit(next: Network, label?: string): void;
@@ -104,12 +107,14 @@ export const useStore = create<State>((set, get) => ({
   fitToken: 0,
   mobileSheet: null,
   filling: null,
-  fillLevels: {},
+  fillSim: null,
+  fillTime: 0,
 
   commit(next) {
     const { net, past } = get();
     set({ net: next, past: [...past.slice(-49), net], future: [], stale: true });
     saveLocalNetwork(next);
+    setReferencePristine(false);
   },
   patchSilently(fn) {
     const next = fn(get().net);
@@ -190,6 +195,7 @@ export const useStore = create<State>((set, get) => ({
     set({ busy: 'Chargement du réseau de la station…' });
     try {
       get().replaceNetwork(await referenceNetwork());
+      setReferencePristine(true);
     } catch (e) {
       get().toast(`Réseau de référence indisponible : ${(e as Error).message}`, 'error');
     } finally {

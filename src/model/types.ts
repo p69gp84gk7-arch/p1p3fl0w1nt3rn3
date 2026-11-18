@@ -63,6 +63,8 @@ export interface NetNode {
   priorite: string;
   /** Salle des machines / surpresseur / réducteur : en service (sinon arrêt / by-pass). */
   en_marche: boolean;
+  /** Salle des machines / surpresseur : débit de remplissage du réseau (m³/h). */
+  debit_remplissage_m3h: number;
 }
 
 export type PipeStatus = 'ouverte' | 'fermee';

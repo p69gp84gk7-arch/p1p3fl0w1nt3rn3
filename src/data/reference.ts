@@ -15,7 +15,7 @@ export const REFERENCE_FILES = {
 
 export const REFERENCE_NAME = 'Réseau neige – référence';
 /** À incrémenter à chaque évolution du réseau de référence. */
-export const REFERENCE_VERSION = '2026-11-19.1';
+export const REFERENCE_VERSION = '2026-11-19.2';
 
 /** Construit le réseau à partir des fichiers (sans les altitudes). */
 export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Network {

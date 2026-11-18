@@ -4,7 +4,7 @@ import { couronneField, effectiveFlow, isBP, isConsumer, isRegulator, LAYER_COLO
 import { deleteNode, deletePipe, mergeAtNode, nodeMapOf, orientByFlow, reversePipe } from '../model/edit';
 import { pipeLength } from '../hydraulics/solver';
 import { COURONNES, type Couronnes, type Layer, type NetNode, type NodeType, type Pipe } from '../model/types';
-import { NumField, Row, Section, TextField, Toggle } from './fields';
+import { ChoiceField, NumField, Row, Section, TextField, Toggle } from './fields';
 import { BASE_LAYERS, fmt, STATUS_COLOR, STATUS_LABEL } from './display';
 import { newId } from '../model/ids';
 import { SheetHeader } from './MobileNav';
@@ -146,7 +146,14 @@ function NodeEditor({ node }: { node: NetNode }) {
           <LayerSelect value={node.calque} onChange={(v) => up({ calque: v })} disabled={locked} />
         </Row>
         <Row label="Piste / secteur">
-          <TextField value={node.secteur} onChange={(v) => up({ secteur: v })} disabled={locked} />
+          <ChoiceField
+            value={node.secteur}
+            options={[...new Set(net.nodes.map((n) => n.secteur))].sort((a, b) => a.localeCompare(b, 'fr'))}
+            emptyLabel="(aucune)"
+            allowNew="Nom de la nouvelle piste :"
+            onChange={(v) => up({ secteur: v })}
+            disabled={locked}
+          />
         </Row>
         <Row label="Altitude" hint="Récupérée automatiquement depuis la position GPS (IGN RGE ALTI®)">
           <NumField value={node.altitude_m} unit="m" digits={1} onChange={(v) => up({ altitude_m: v })} disabled={locked} />
@@ -167,13 +174,20 @@ function NodeEditor({ node }: { node: NetNode }) {
           <Row label="Modèle">
             <select value={node.modele} onChange={(e) => applyModel(e.target.value)} disabled={locked}>
               <option value="">—</option>
-              {net.modeles.map((m) => (
-                <option key={m.modele} value={m.modele}>
-                  {m.modele}
-                </option>
+              {(['perche', 'ventilateur'] as const).map((t) => (
+                <optgroup key={t} label={t === 'perche' ? 'Perches' : 'Ventilateurs'}>
+                  {net.modeles
+                    .filter((m) => (m.type === t) || (t === 'ventilateur' && m.type !== 'perche'))
+                    .map((m) => (
+                      <option key={m.modele} value={m.modele}>
+                        {m.modele} ({fmt(m.pression_min_bar, 0)} bar mini)
+                      </option>
+                    ))}
+                </optgroup>
               ))}
               {node.modele && !model && <option value={node.modele}>{node.modele}</option>}
             </select>
+            {model?.type && <span className="muted small">{model.type}</span>}
           </Row>
           <Row label="Couronnes">
             <div className="segmented">
@@ -230,7 +244,15 @@ function NodeEditor({ node }: { node: NetNode }) {
             <NumField value={node.air} digits={1} onChange={(v) => up({ air: v })} disabled={locked} />
           </Row>
           <Row label="Priorité">
-            <TextField value={node.priorite} onChange={(v) => up({ priorite: v })} disabled={locked} />
+            <ChoiceField
+              value={node.priorite}
+              options={[...new Set(['1', '2', '3', 'BP', ...net.nodes.map((n) => n.priorite)])]}
+              labels={{ BP: 'BP (basse pression)' }}
+              emptyLabel="(aucune)"
+              allowNew="Priorité :"
+              onChange={(v) => up({ priorite: v, pression_min_bar: minPressureFor({ ...node, priorite: v }, net) })}
+              disabled={locked}
+            />
           </Row>
         </Section>
       )}
@@ -462,7 +484,13 @@ function PipeEditor({ pipe }: { pipe: Pipe }) {
           <NumField value={pipe.diametre_int_mm} unit="mm" digits={1} onChange={(v) => up({ diametre_int_mm: v })} disabled={locked} />
         </Row>
         <Row label="Matériau">
-          <TextField value={pipe.materiau} onChange={(v) => up({ materiau: v })} disabled={locked} />
+          <ChoiceField
+            value={pipe.materiau}
+            options={[...new Set([...net.catalogue.map((c) => c.materiau), ...net.pipes.map((p) => p.materiau)])]}
+            allowNew="Matériau :"
+            onChange={(v) => up({ materiau: v })}
+            disabled={locked}
+          />
         </Row>
         <Row label="Rugosité">
           <NumField value={pipe.rugosite_mm} unit="mm" digits={3} onChange={(v) => up({ rugosite_mm: v })} disabled={locked} />
@@ -1062,10 +1090,12 @@ export function UnsavedBanner() {
   );
 }
 
-/** Démarrer / arrêter une piste entière d'un coup. */
+/** Pistes en menus déroulants : toute la piste d'un coup, ou canon par canon. */
 function PistesSection() {
   const net = useStore((s) => s.net);
   const results = useStore((s) => s.results);
+  const selection = useStore((s) => s.selection);
+  const [ouvertes, setOuvertes] = useState<Set<string>>(new Set());
   const st = useStore.getState;
   const locked = new Set(net.calques.filter((l) => l.verrouille).map((l) => l.id));
   const pistes = useMemo(() => {
@@ -1075,6 +1105,7 @@ function PistesSection() {
       const k = n.secteur || '(sans piste)';
       (m.get(k) ?? m.set(k, []).get(k)!).push(n);
     }
+    for (const list of m.values()) list.sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { numeric: true }));
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr'));
   }, [net.nodes]);
   if (!pistes.length) return null;
@@ -1082,46 +1113,103 @@ function PistesSection() {
     st().commit({ ...st().net, nodes: st().net.nodes.map((n) => (ids.has(n.id) && !locked.has(n.calque) ? { ...n, ...patch(n) } : n)) });
     if (st().results) st().runCalc();
   };
+  const toggleOpen = (k: string) => {
+    const s2 = new Set(ouvertes);
+    if (s2.has(k)) s2.delete(k);
+    else s2.add(k);
+    setOuvertes(s2);
+  };
+  const couronnesSelect = (ids: Set<string>, current: Couronnes | null, title: string, gun?: NetNode) => (
+    <select
+      value={current ?? '__'}
+      title={title}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        const c = e.target.value as Couronnes;
+        apply(ids, (n) => (c === '' || n[couronneField(c)] > 0 ? { couronnes: c } : {}));
+      }}
+    >
+      {current === null && (
+        <option value="__" disabled>
+          Couronnes
+        </option>
+      )}
+      {COURONNES.map((c) => (
+        <option key={c} value={c} disabled={!!gun && !(gun[couronneField(c)] > 0)}>
+          {c.toUpperCase()}
+        </option>
+      ))}
+      {gun && <option value="">Manuel</option>}
+    </select>
+  );
   return (
-    <Section title="Pistes">
+    <Section
+      title="Pistes"
+      actions={
+        <span className="pistes-actions">
+          <button className="btn small" onClick={() => setOuvertes(new Set(pistes.map(([k]) => k)))}>
+            Tout déplier
+          </button>
+          <button className="btn small" onClick={() => setOuvertes(new Set())}>
+            Replier
+          </button>
+        </span>
+      }
+    >
       <ul className="pistes">
         {pistes.map(([k, guns]) => {
           const on = guns.filter((n) => n.actif).length;
           const q = guns.filter((n) => n.actif).reduce((a, n) => a + effectiveFlow(n), 0);
           const rouges = guns.filter((n) => isUnderPressure(n, results?.nodes[n.id])).length;
           const ids = new Set(guns.map((n) => n.id));
+          const open = ouvertes.has(k);
           return (
-            <li key={k} className={rouges ? 'low' : ''}>
-              <Toggle checked={on > 0} onChange={(v) => apply(ids, () => ({ actif: v }))} />
-              <span className="piste-name">
-                <b>{k}</b>
-                <span className="small muted">
-                  {on}/{guns.length} en marche{on > 0 && ` · ${fmt(q, 0)} m³/h`}
-                  {rouges > 0 && <span className="ko-text"> · {rouges} sous P mini</span>}
+            <li key={k} className={`piste ${rouges ? 'low' : ''} ${open ? 'open' : ''}`}>
+              <div className="piste-head" onClick={() => toggleOpen(k)} role="button" aria-expanded={open}>
+                <span onClick={(e) => e.stopPropagation()}>
+                  <Toggle checked={on > 0} onChange={(v) => apply(ids, () => ({ actif: v }))} />
                 </span>
-              </span>
-              <select
-                value="__"
-                title="Couronnes pour toute la piste"
-                onChange={(e) => {
-                  const c = e.target.value as Couronnes;
-                  apply(ids, (n) => (c === '' || n[couronneField(c)] > 0 ? { couronnes: c } : {}));
-                }}
-              >
-                <option value="__" disabled>
-                  Couronnes
-                </option>
-                {COURONNES.map((c) => (
-                  <option key={c} value={c}>
-                    {c.toUpperCase()}
-                  </option>
-                ))}
-              </select>
+                <span className="piste-name">
+                  <b>
+                    <span className="chevron">{open ? '▾' : '▸'}</span> {k}
+                  </b>
+                  <span className="small muted">
+                    {on}/{guns.length} en marche{on > 0 && ` · ${fmt(q, 0)} m³/h`}
+                    {rouges > 0 && <span className="ko-text"> · {rouges} sous P mini</span>}
+                  </span>
+                </span>
+                {couronnesSelect(ids, null, 'Couronnes pour toute la piste')}
+              </div>
+              {open && (
+                <ul className="piste-guns">
+                  {guns.map((n) => {
+                    const r = results?.nodes[n.id];
+                    const low = isUnderPressure(n, r);
+                    const lk = locked.has(n.calque);
+                    return (
+                      <li key={n.id} className={`${low ? 'low-pressure' : ''} ${selection?.id === n.id ? 'selected' : ''}`}>
+                        <Toggle checked={n.actif} disabled={lk} onChange={(v) => apply(new Set([n.id]), () => ({ actif: v }))} />
+                        <button className="linklike gun-name" onClick={() => st().setSelection({ kind: 'node', id: n.id })} title="Ouvrir la fiche du canon">
+                          <span>
+                            <b>{n.nom}</b> <span className="muted small">{n.modele}</span>
+                          </span>
+                          <span className={`gun-p small ${low ? 'ko-text' : 'muted'}`} title={`Pression mini ${fmt(n.pression_min_bar, 0)} bar`}>
+                            {r && Number.isFinite(r.pression_bar) ? `${fmt(r.pression_bar, 1)} bar` : 'non calculé'}
+                            {low && ` < ${fmt(n.pression_min_bar, 0)} mini`}
+                            {n.actif && ` · ${fmt(effectiveFlow(n), 1)} m³/h`}
+                          </span>
+                        </button>
+                        {couronnesSelect(new Set([n.id]), n.couronnes, 'Couronnes du canon', n)}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </li>
           );
         })}
       </ul>
-      <p className="small muted">Interrupteur : démarre ou arrête tous les canons de la piste. Le détail canon par canon est dans « Regards & enneigeurs ».</p>
+      <p className="small muted">Interrupteur de la piste : tous ses canons d’un coup. Touchez une piste pour la dérouler et régler chaque canon.</p>
     </Section>
   );
 }

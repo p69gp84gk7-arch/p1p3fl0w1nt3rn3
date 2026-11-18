@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import Modal from './Modal';
-import { NumField, Row, TextField } from './fields';
+import { ChoiceField, NumField, Row, TextField } from './fields';
 import { pingSheets } from '../services/sheets';
 import type { GunModel, Params, PipeSpec } from '../model/types';
 import type { ElevationSource } from '../services/elevation';
@@ -163,7 +163,7 @@ function EditableTable<T extends object>({
   make,
 }: {
   rows: T[];
-  cols: { key: keyof T; label: string; num?: boolean }[];
+  cols: { key: keyof T; label: string; num?: boolean; options?: string[]; labels?: Record<string, string>; allowNew?: string }[];
   onChange: (rows: T[]) => void;
   make: () => T;
 }) {
@@ -186,6 +186,14 @@ function EditableTable<T extends object>({
                   <td key={String(c.key)}>
                     {c.num ? (
                       <NumField value={r[c.key] as number} onChange={(v) => onChange(rows.map((x, j) => (j === i ? { ...x, [c.key]: v } : x)))} />
+                    ) : c.options ? (
+                      <ChoiceField
+                        value={String(r[c.key] ?? '')}
+                        options={c.options}
+                        labels={c.labels}
+                        allowNew={c.allowNew}
+                        onChange={(v) => onChange(rows.map((x, j) => (j === i ? { ...x, [c.key]: v } : x)))}
+                      />
                     ) : (
                       <TextField value={String(r[c.key] ?? '')} onChange={(v) => onChange(rows.map((x, j) => (j === i ? { ...x, [c.key]: v } : x)))} />
                     )}
@@ -218,7 +226,7 @@ function CatalogueTab() {
       make={() => ({ ref: 'NOUVEAU', materiau: 'Fonte ductile', dn: 150, pn_bar: 64, diametre_int_mm: 151, rugosite_mm: 0.1 })}
       cols={[
         { key: 'ref', label: 'Référence' },
-        { key: 'materiau', label: 'Matériau' },
+        { key: 'materiau', label: 'Matériau', options: [...new Set(['Fonte ductile', 'Acier', 'PEHD', ...catalogue.map((c) => c.materiau)])], allowNew: 'Matériau :' },
         { key: 'dn', label: 'DN', num: true },
         { key: 'pn_bar', label: 'PN (bar)', num: true },
         { key: 'diametre_int_mm', label: 'Ø int. (mm)', num: true },
@@ -254,7 +262,7 @@ function ModelsTab() {
       make={() => ({ modele: 'Nouveau modèle', type: 'perche', debit_nominal_m3h: 15, debit_min_m3h: 3, debit_max_m3h: 25, pression_min_bar: 15, pression_max_bar: 60, k_buse: 2.5, pression_regulation_bar: 0 })}
       cols={[
         { key: 'modele', label: 'Modèle' },
-        { key: 'type', label: 'Type' },
+        { key: 'type', label: 'Type', options: ['perche', 'ventilateur'], labels: { perche: 'Perche', ventilateur: 'Ventilateur' } },
         { key: 'debit_nominal_m3h', label: 'Q nominal (m³/h)', num: true },
         { key: 'debit_min_m3h', label: 'Q min', num: true },
         { key: 'debit_max_m3h', label: 'Q max', num: true },

@@ -136,4 +136,17 @@ describe('réseau de référence intégré', () => {
     const off = { ...ref, nodes: ref.nodes.map((n) => (n.id === booster.id ? { ...n, en_marche: false } : n)) };
     expect(hount.every((n) => simulateFilling(off).nodeTime[n.id] === undefined)).toBe(true);
   });
+
+  it('modèles : perches / ventilateurs et pressions mini (Borax 6, ventilateurs 8, Rubis/Revo 18)', async () => {
+    const ref = await referenceNetwork();
+    const m = (nom: string) => ref.modeles.find((x) => x.modele === nom)!;
+    for (const p of ['safyr', 'borax', 'rubis', 'revo', 'v3', 'street', 'taurus', 'tl4', 'tl6']) expect(m(p).type).toBe('perche');
+    for (const v of ['t40', 't60', 'tf10', 'tr8', 'demac', 'peak']) {
+      expect(m(v).type).toBe('ventilateur');
+      expect(m(v).pression_min_bar).toBe(8);
+    }
+    expect(m('borax').pression_min_bar).toBe(6);
+    expect(m('rubis').pression_min_bar).toBe(18);
+    expect(ref.nodes.filter((n) => n.modele === 'borax').every((n) => n.pression_min_bar === 6)).toBe(true);
+  });
 });

@@ -2066,15 +2066,77 @@ tr.low-pressure:hover td {
   flex-direction: column;
   gap: 2px;
 }
-.pistes li {
+.pistes > li {
+  border-radius: 8px;
+}
+.pistes > li.low {
+  background: #fdf1f1;
+}
+.pistes > li.open {
+  background: #f4f8fd;
+}
+.pistes > li.open.low {
+  background: #fdf1f1;
+}
+.piste-head {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 5px 4px;
-  border-radius: 8px;
+  cursor: pointer;
 }
-.pistes li.low {
-  background: #fdf1f1;
+.pistes-actions {
+  display: flex;
+  gap: 4px;
+}
+.piste-guns {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0 4px 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.piste-guns li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: #fff;
+}
+.piste-guns li.selected {
+  outline: 2px solid #b9d3ee;
+}
+.piste-guns li.low-pressure {
+  background: #fdecec;
+}
+.piste-guns .gun-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.piste-guns .gun-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.piste-guns .gun-p {
+  white-space: nowrap;
+}
+.piste-guns .toggle-track {
+  width: 30px;
+  height: 17px;
+}
+.piste-guns .toggle-thumb {
+  width: 13px;
+  height: 13px;
+}
+.piste-guns .toggle.on .toggle-thumb {
+  left: 15px;
 }
 .pistes .piste-name {
   flex: 1;
@@ -2091,4 +2153,10 @@ tr.low-pressure:hover td {
   width: auto;
   padding: 2px 4px;
   font-size: 12px;
+}
+table.editable td:first-child input {
+  min-width: 150px;
+}
+table.editable select {
+  min-width: 120px;
 }

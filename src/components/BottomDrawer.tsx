@@ -76,7 +76,8 @@ function GunsTable() {
   const st = useStore.getState;
   const [secteur, setSecteur] = useState('');
   const [q, setQ] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'canons' | 'tous' | NodeType>('canons');
+  const [typeFilter, setTypeFilter] = useState<'canons' | 'tous' | 'perche' | 'ventilateur' | NodeType>('canons');
+  const modelType = useMemo(() => new Map(net.modeles.map((m) => [m.modele, m.type])), [net.modeles]);
   const [parPiste, setParPiste] = useState(true);
   const [ouvertes, setOuvertes] = useState<Set<string>>(new Set());
   const [rougesSeuls, setRougesSeuls] = useState(false);
@@ -85,7 +86,12 @@ function GunsTable() {
   const rows = net.nodes
     .filter(
       (n) =>
-        (typeFilter === 'tous' || (typeFilter === 'canons' ? isConsumer(n.type) : n.type === typeFilter)) &&
+        (typeFilter === 'tous' ||
+          (typeFilter === 'canons'
+            ? isConsumer(n.type)
+            : typeFilter === 'perche' || typeFilter === 'ventilateur'
+              ? n.type === 'enneigeur' && (modelType.get(n.modele) === 'perche' ? 'perche' : 'ventilateur') === typeFilter
+              : n.type === typeFilter)) &&
         (!secteur || n.secteur === secteur) &&
         (!q || `${n.nom} ${n.modele} ${n.secteur}`.toLowerCase().includes(q.toLowerCase())) &&
         (!rougesSeuls || isUnderPressure(n, results?.nodes[n.id])),
@@ -189,6 +195,8 @@ function GunsTable() {
         </select>
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}>
           <option value="canons">Enneigeurs et regards</option>
+          <option value="perche">Perches</option>
+          <option value="ventilateur">Ventilateurs</option>
           <option value="tous">Tous les points</option>
           {NODE_TYPES.map((t) => (
             <option key={t} value={t}>

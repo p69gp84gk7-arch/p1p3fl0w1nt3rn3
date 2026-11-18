@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import type { Dialog } from '../App';
 import { captureScenario } from '../model/scenario';
-import { loadFromSheets, saveResultsToSheets, saveToSheets } from '../services/sheets';
+import { saveResultsToSheets } from '../services/sheets';
 import { downloadFile } from '../services/storage';
 import { resultsCsv } from './exports';
 import { fmt } from './display';
@@ -15,6 +15,7 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
   const scenario = useStore((s) => s.scenario);
   const settings = useStore((s) => s.settings);
   const past = useStore((s) => s.past.length);
+  const unsaved = useStore((s) => s.unsaved);
   const future = useStore((s) => s.future.length);
   const st = useStore.getState;
   const [menu, setMenu] = useState<'fichier' | null>(null);
@@ -40,13 +41,10 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
     setSyncing(what);
     try {
       if (what === 'load') {
-        if (net.nodes.length && !confirm('Remplacer le réseau affiché par celui de Google Sheets ?')) return;
-        const n = await loadFromSheets(settings);
-        st().replaceNetwork(n);
-        st().toast(`Réseau chargé : ${n.nodes.length} nœuds, ${n.pipes.length} canalisations.`, 'success');
+        if (st().unsaved && !confirm('Des modifications ne sont pas enregistrées dans Google Sheets. Les remplacer par le réseau de Google Sheets ?')) return;
+        await st().loadSheets();
       } else if (what === 'save') {
-        await saveToSheets(settings, net);
-        st().toast('Réseau enregistré dans Google Sheets.', 'success');
+        await st().saveSheets();
       } else {
         const r = results ?? st().runCalc();
         await saveResultsToSheets(settings, net, r);
@@ -145,7 +143,7 @@ export default function TopBar({ openDialog }: { openDialog: (d: Dialog) => void
         <button className="btn icon" title="Rétablir (Ctrl+Y)" disabled={!future} onClick={() => st().redo()}>
           ↷
         </button>
-        <button className="btn" title="Enregistrer dans Google Sheets" onClick={() => sheets('save')} disabled={!!syncing}>
+        <button className={`btn ${unsaved && settings.sheetsUrl ? 'unsaved' : ''}`} title={unsaved ? 'Modifications non enregistrées dans Google Sheets' : 'Enregistrer dans Google Sheets'} onClick={() => sheets('save')} disabled={!!syncing}>
           {syncing ? <span className="spinner dark" /> : '☁️'} {syncing === 'load' ? 'Chargement…' : syncing ? 'Envoi…' : 'Enregistrer'}
         </button>
       </div>

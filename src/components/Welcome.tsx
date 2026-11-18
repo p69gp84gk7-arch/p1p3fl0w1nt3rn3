@@ -1,23 +1,13 @@
 import { useStore } from '../store';
 import type { Dialog } from '../App';
 import { demoNetwork } from '../model/demo';
-import { loadFromSheets } from '../services/sheets';
 
 export default function Welcome({ openDialog }: { openDialog: (d: Dialog) => void }) {
   const settings = useStore((s) => s.settings);
   const st = useStore.getState;
   const openSheets = async () => {
     if (!settings.sheetsUrl) return openDialog('settings');
-    try {
-      st().set('busy', 'Chargement depuis Google Sheets…');
-      const n = await loadFromSheets(settings);
-      st().replaceNetwork(n);
-      st().toast(`Réseau chargé : ${n.nodes.length} nœuds.`, 'success');
-    } catch (e) {
-      st().toast((e as Error).message, 'error');
-    } finally {
-      st().set('busy', null);
-    }
+    await st().loadSheets();
   };
   return (
     <div className="welcome">

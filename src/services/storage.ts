@@ -80,6 +80,34 @@ export function saveLocalNetwork(net: Network) {
   safeSet(NET_KEY, JSON.stringify(net));
 }
 
+const PRISTINE_KEY = 'pipeflow-neige:reference-intacte';
+const SOURCE_KEY = 'pipeflow-neige:source';
+const DIRTY_KEY = 'pipeflow-neige:modifs-non-enregistrees';
+
+/** Origine du réseau affiché : réseau de la station, Google Sheets ou fichier importé. */
+export type NetworkSource = 'reference' | 'sheets' | 'fichier';
+export function getSource(): NetworkSource | null {
+  return safeGet(SOURCE_KEY) as NetworkSource | null;
+}
+export function setSource(s: NetworkSource) {
+  safeSet(SOURCE_KEY, s);
+}
+/** Des modifications faites sur cet appareil n'ont pas encore été enregistrées dans Google Sheets. */
+export function hasUnsavedChanges(): boolean {
+  return safeGet(DIRTY_KEY) === '1';
+}
+export function setUnsavedChanges(v: boolean) {
+  safeSet(DIRTY_KEY, v ? '1' : '0');
+}
+
+/** Le réseau de la station n'a pas été modifié sur cet appareil depuis son chargement. */
+export function isReferencePristine(): boolean {
+  return safeGet(PRISTINE_KEY) === '1';
+}
+export function setReferencePristine(v: boolean) {
+  safeSet(PRISTINE_KEY, v ? '1' : '0');
+}
+
 export function loadSettings(): Settings {
   const raw = safeGet(SETTINGS_KEY);
   try {
@@ -102,9 +130,8 @@ export function saveSettings(s: Settings) {
 /** Complète un réseau partiel (fichier JSON, ancienne version…). */
 export function normalizeNetwork(n: Partial<Network>): Network {
   const e = emptyNetwork();
-  const node0 = makeNode('jonction', 0, 0, e.params);
   return {
-    nodes: (n.nodes ?? []).map((x) => ({ ...node0, ...x })),
+    nodes: (n.nodes ?? []).map((x) => ({ ...makeNode(x.type ?? 'jonction', 0, 0, e.params), ...x })),
     pipes: (n.pipes ?? []).map((p) => ({ ...p, calque: p.calque ?? 'existant', geometrie: p.geometrie ?? [], diametre_estime: p.diametre_estime ?? false })),
     calques: n.calques?.length ? n.calques : e.calques,
     catalogue: n.catalogue?.length ? n.catalogue : e.catalogue,

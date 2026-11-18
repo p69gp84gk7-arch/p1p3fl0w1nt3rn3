@@ -24,7 +24,7 @@ export const SHEETS = {
 export const NODE_COLUMNS: (keyof NetNode)[] = [
   'id', 'type', 'nom', 'lat', 'lon', 'altitude_m', 'modele', 'debit_m3h', 'mode_debit', 'k_buse',
   'pression_min_bar', 'actif', 'pression_consigne_bar', 'debit_max_m3h', 'notes', 'calque', 'aspiration',
-  'secteur', 'couronnes', 'debit_c1', 'debit_c1c2', 'debit_c1c3', 'debit_c1c2c3', 'air', 'priorite', 'en_marche',
+  'secteur', 'couronnes', 'debit_c1', 'debit_c1c2', 'debit_c1c3', 'debit_c1c2c3', 'air', 'priorite', 'en_marche', 'debit_remplissage_m3h',
 ];
 export const PIPE_COLUMNS: (keyof Pipe)[] = [
   'id', 'nom', 'amont', 'aval', 'longueur_m', 'longueur_auto', 'dn', 'diametre_int_mm', 'materiau',
@@ -154,6 +154,7 @@ export function rowsToNetwork(data: Record<string, Row[]>): Network {
         air: num(r.air),
         priorite: str(r.priorite),
         en_marche: bool(r.en_marche, true),
+        debit_remplissage_m3h: num(r.debit_remplissage_m3h, type === 'salle_machines' ? 150 : type === 'surpresseur' ? 60 : 0),
       };
     });
   const pipes: Pipe[] = (data[SHEETS.pipes] ?? [])

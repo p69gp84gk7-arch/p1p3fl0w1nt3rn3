@@ -12,7 +12,9 @@ import DiametersDialog from './DiametersDialog';
 import { calibrateSource, pressureAt, type CalageResult } from '../hydraulics/calage';
 import { staticNetwork } from '../model/scenario';
 import { pressurize, stopPressurize } from './pressurize';
+import { formatDuree } from '../hydraulics/remplissage';
 import { REFERENCE_NAME, REFERENCE_VERSION } from '../data/reference';
+import { getSource } from '../services/storage';
 
 export default function SidePanel() {
   const selection = useStore((s) => s.selection);
@@ -545,7 +547,6 @@ function Overview() {
 
   return (
     <div className="overview">
-      <ReferenceUpdateNotice />
       <Section title="Réseau">
         <div className="stats">
           <div>
@@ -704,6 +705,7 @@ function PumpingSection() {
     <Section title="Pompage">
       {!stations.length && <p className="small muted">Aucune salle des machines : ajoutez-en une avec la barre d’outils.</p>}
       {stations.some((n) => n.type === 'salle_machines') && <CalageCard />}
+      <FillReport />
       <div className="stations">
         {stations.map((n) => (
           <StationCard key={n.id} node={n} />
@@ -725,10 +727,13 @@ function CalageCard() {
   const net = useStore((s) => s.net);
   const st = useStore.getState;
   const [res, setRes] = useState<CalageResult | null>(null);
-  const sdm = net.nodes.find((n) => n.type === 'salle_machines')!;
-  const boosters = net.nodes.filter((n) => isRegulator(n.type));
-  const targetId = net.params.calage_noeud && net.nodes.some((n) => n.id === net.params.calage_noeud) ? net.params.calage_noeud : boosters[0]?.id ?? '';
+  const stationsAll = net.nodes.filter((n) => n.type === 'salle_machines' || isRegulator(n.type));
+  const [stationId, setStationId] = useState(stationsAll.find((n) => n.type === 'salle_machines')!.id);
+  const sdm = stationsAll.find((n) => n.id === stationId) ?? stationsAll[0];
+  const boosters = net.nodes.filter((n) => isRegulator(n.type) && n.id !== sdm.id);
   const candidates = [...boosters, ...net.nodes.filter((n) => !isRegulator(n.type) && n.type !== 'salle_machines' && n.type !== 'jonction').sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { numeric: true }))];
+  const targetId =
+    net.params.calage_noeud && net.params.calage_noeud !== sdm.id && candidates.some((n) => n.id === net.params.calage_noeud) ? net.params.calage_noeud : candidates[0]?.id ?? '';
   const setParam = (p: Partial<typeof net.params>) => {
     st().commit({ ...st().net, params: { ...st().net.params, ...p } });
     setRes(null);
@@ -738,13 +743,28 @@ function CalageCard() {
   return (
     <details className="calage" open>
       <summary>⚙ Calage de la pression (réseau chargé, canons fermés)</summary>
-      <p className="small muted">Indiquez une pression relevée sur l’installation, canons fermés : l’application recalcule la pression de refoulement de l’usine.</p>
+      <p className="small muted">Indiquez une pression relevée sur l’installation, canons fermés : l’application recalcule la pression de sortie de la station choisie.</p>
+      <Row label="Station à régler">
+        <select
+          value={sdm.id}
+          onChange={(e) => {
+            setStationId(e.target.value);
+            setRes(null);
+          }}
+        >
+          {stationsAll.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.nom} ({NODE_LABEL[n.type].toLowerCase()})
+            </option>
+          ))}
+        </select>
+      </Row>
       <Row label="Pression relevée">
         <NumField value={net.params.calage_pression_bar} unit="bar" digits={1} onChange={(v) => setParam({ calage_pression_bar: v })} />
       </Row>
       <Row label="À l’arrivée de">
         <select value={targetId} onChange={(e) => setParam({ calage_noeud: e.target.value })}>
-          {candidates.map((n) => (
+          {candidates.filter((n) => n.id !== sdm.id).map((n) => (
             <option key={n.id} value={n.id}>
               {n.nom || n.id} ({NODE_LABEL[n.type].toLowerCase()}, {fmt(n.altitude_m, 0)} m)
             </option>
@@ -758,7 +778,7 @@ function CalageCard() {
         {res && res.ok && (
           <>
             <span className="small">
-              Usine : <b>{fmt(res.consigne, 1)} bar</b> → {fmt(res.obtenue, 1)} bar à {target?.nom}
+              {sdm.nom} : <b>{fmt(res.consigne, 1)} bar</b> → {fmt(res.obtenue, 1)} bar à {target?.nom}
             </span>
             <button
               className="btn small primary"
@@ -766,7 +786,7 @@ function CalageCard() {
               onClick={() => {
                 st().updateNode(sdm.id, { pression_consigne_bar: res.consigne, en_marche: true });
                 st().runCalc(true);
-                st().toast(`Usine réglée à ${fmt(res.consigne, 1)} bar : ${fmt(res.obtenue, 1)} bar à l’arrivée de ${target?.nom}, canons fermés.`, 'success');
+                st().toast(`${sdm.nom} réglé à ${fmt(res.consigne, 1)} bar : ${fmt(res.obtenue, 1)} bar à ${target?.nom}, canons fermés.`, 'success');
               }}
             >
               Appliquer
@@ -806,22 +826,15 @@ function StationCard({ node: n }: { node: NetNode }) {
   };
 
   const start = () => {
-    if (isSdm) {
-      pressurize(n.id, 0, n.pression_consigne_bar > 0 ? n.pression_consigne_bar : 60, () =>
-        st().toast(`Réseau chargé à ${fmt(n.pression_consigne_bar, 1)} bar en sortie d’usine (canons fermés).`, 'success'),
-      );
-      return;
-    }
-    // Booster : il faut que l'eau lui arrive.
+    if (isSdm) return pressurize(n.id);
+    // Booster : il faut que l'eau lui arrive (réseau principal chargé).
     if (!sdm || sdm.en_marche === false) return st().toast('Mettez d’abord l’usine en marche.', 'error');
     const Pin = pressureAt(staticNetwork(st().net), n.id);
     if (!(Pin >= 0)) {
       const need = calibrateSource(st().net, sdm.id, n.id, 0.5);
-      return st().toast(`Booster désamorcé : l’eau ne lui arrive pas. Il faut au moins ${fmt(need.consigne, 1)} bar à l’usine.`, 'error');
+      return st().toast(`L’eau n’arrive pas au booster : il faut au moins ${fmt(need.consigne, 1)} bar à l’usine.`, 'error');
     }
-    pressurize(n.id, Math.min(Pin, n.pression_consigne_bar), n.pression_consigne_bar, () =>
-      st().toast(`Ligne du booster chargée à ${fmt(n.pression_consigne_bar, 1)} bar.`, 'success'),
-    );
+    pressurize(n.id);
   };
   useEffect(() => () => {
     if (useStore.getState().filling === n.id) stopPressurize();
@@ -861,9 +874,13 @@ function StationCard({ node: n }: { node: NetNode }) {
             className={`btn small ${anim ? '' : 'primary'}`}
             disabled={locked || (!!filling && !anim)}
             onClick={anim ? stopPressurize : start}
-            title={isSdm ? 'Fait monter la pression depuis 0 bar, canons fermés : on voit les canalisations se remplir' : 'Démarre le booster et fait monter la pression de sa ligne, canons fermés'}
+            title={
+              isSdm
+                ? 'Simule le chargement du réseau vide, canons fermés : l’eau avance le long des canalisations, avec les temps réels (volume ÷ débit de remplissage)'
+                : 'Simule le remplissage de la ligne du booster (réseau principal déjà chargé)'
+            }
           >
-            {anim ? '■ Stop' : '▶ Mise en pression'}
+            {anim ? '■ Stop' : '▶ Remplissage'}
           </button>
         )}
       </div>
@@ -902,6 +919,11 @@ function StationCard({ node: n }: { node: NetNode }) {
           {isSdm ? 'L’eau peut monter jusqu’à' : 'Charge en sortie :'} <b>{fmt(waterLevel, 0)} m</b> d’altitude (sans débit)
         </div>
       )}
+      {(isSdm || isBooster) && (
+        <Row label="Débit de remplissage" hint="Débit utilisé pour charger le réseau vide (sert au calcul des temps de remplissage)">
+          <NumField value={n.debit_remplissage_m3h} unit="m³/h" digits={0} disabled={locked} onChange={(v) => st().updateNode(n.id, { debit_remplissage_m3h: v })} />
+        </Row>
+      )}
       {n.type !== 'reducteur' && (
         <Row label="Débit maximal">
           <NumField value={n.debit_max_m3h} unit="m³/h" digits={0} disabled={locked} onChange={(v) => st().updateNode(n.id, { debit_max_m3h: v })} />
@@ -935,23 +957,104 @@ function StationCard({ node: n }: { node: NetNode }) {
 }
 
 /** Propose de recharger le réseau de la station quand une nouvelle version est intégrée. */
-function ReferenceUpdateNotice() {
+export function ReferenceBanner() {
   const params = useStore((s) => s.net.params);
-  const fromReference = params.reference_version !== '' || params.nom_projet === REFERENCE_NAME;
-  if (!fromReference || params.reference_version === REFERENCE_VERSION) return null;
+  const [hidden, setHidden] = useState(false);
+  const source = getSource();
+  const fromReference = source !== 'sheets' && source !== 'fichier' && (params.reference_version !== '' || params.nom_projet === REFERENCE_NAME);
+  if (hidden || !fromReference || params.reference_version === REFERENCE_VERSION) return null;
   return (
-    <div className="notice">
-      Une nouvelle version du réseau de la station est disponible (pressions mini, réglages…).
-      <div style={{ marginTop: 6 }}>
-        <button
-          className="btn small primary"
-          onClick={() => {
-            if (confirm('Recharger le réseau de la station ? Les modifications faites sur cet appareil seront remplacées (Ctrl+Z pour annuler).')) void useStore.getState().loadReference();
-          }}
-        >
-          Recharger le réseau de la station
-        </button>
+    <div className="ref-banner">
+      <span>🔄 Nouvelle version du réseau de la station disponible (diamètres, réglages…).</span>
+      <button
+        className="btn small primary"
+        onClick={() => {
+          if (confirm('Recharger le réseau de la station ? Vos modifications sur cet appareil seront remplacées (Ctrl+Z pour annuler).')) void useStore.getState().loadReference();
+        }}
+      >
+        Recharger
+      </button>
+      <button className="btn small" onClick={() => setHidden(true)}>
+        Plus tard
+      </button>
+    </div>
+  );
+}
+
+/** Temps de chargement calculés par la dernière simulation de remplissage. */
+function FillReport() {
+  const sim = useStore((s) => s.fillSim);
+  const filling = useStore((s) => s.filling);
+  const net = useStore((s) => s.net);
+  if (!sim || filling) return null;
+  const boosters = Object.entries(sim.boosters);
+  return (
+    <details className="calage fill-report" open>
+      <summary>⏱ Temps de chargement (dernier remplissage simulé)</summary>
+      <div className="small">
+        Durée totale <b>{formatDuree(sim.total_s)}</b> · volume rempli <b>{fmt(sim.volume_m3, 0)} m³</b>
+        {sim.volume_m3 < sim.volume_total_m3 - 0.5 && <> sur {fmt(sim.volume_total_m3, 0)} m³</>}
       </div>
+      {boosters.map(([id, b]) => (
+        <div key={id} className="small">
+          {net.nodes.find((n) => n.id === id)?.nom} : démarre à {formatDuree(b.depart_s)}, sa ligne est pleine à {formatDuree(b.fin_s)} ({fmt(b.volume_m3, 0)} m³)
+        </div>
+      ))}
+      <table className="mini">
+        <thead>
+          <tr>
+            <th>Piste</th>
+            <th className="num">Pleine à</th>
+            <th className="num">Canons</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sim.secteurs.map((s) => (
+            <tr key={s.secteur}>
+              <td>{s.secteur}</td>
+              <td className="num">{s.vides === s.canons ? '—' : formatDuree(s.fin_s)}</td>
+              <td className="num">
+                {s.canons}
+                {s.vides > 0 && <span className="ko"> ({s.vides} vides)</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {sim.messages.map((m, i) => (
+        <div key={i} className="small msg">
+          {m}
+        </div>
+      ))}
+      <p className="small muted">Temps calculés à partir du volume des canalisations (diamètres{net.pipes.some((p) => p.diametre_estime) ? ' en partie estimés' : ''}) et des débits de remplissage.</p>
+    </details>
+  );
+}
+
+/** Rappel : modifications locales non enregistrées dans Google Sheets. */
+export function UnsavedBanner() {
+  const unsaved = useStore((s) => s.unsaved);
+  const sheetsUrl = useStore((s) => s.settings.sheetsUrl);
+  const filling = useStore((s) => s.filling);
+  const [hidden, setHidden] = useState(false);
+  if (!unsaved || !sheetsUrl || hidden || filling) return null;
+  return (
+    <div className="ref-banner unsaved-banner">
+      <span>☁️ Modifications non enregistrées dans Google Sheets.</span>
+      <button className="btn small primary" onClick={() => void useStore.getState().saveSheets()}>
+        Enregistrer
+      </button>
+      <button
+        className="btn small"
+        onClick={() => {
+          if (confirm('Abandonner les modifications de cet appareil et recharger le réseau de Google Sheets ?')) void useStore.getState().loadSheets();
+        }}
+      >
+        Recharger Sheets
+      </button>
+      <button className="btn small" onClick={() => setHidden(true)}>
+        ✕
+      </button>
     </div>
   );
 }

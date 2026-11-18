@@ -29,8 +29,9 @@ describe('simulation du remplissage', () => {
     // F (1020 m, branche basse) d'abord, puis la montée vers J, puis la vallée derrière J
     expect(r.nodeTime.F).toBeCloseTo(vol(200) / rate, 3);
     expect(r.nodeTime.J).toBeCloseTo((vol(200) + vol(1000)) / rate, 3);
-    expect(r.nodeTime.E).toBeCloseTo((vol(200) + vol(1000) + vol(500)) / rate, 3);
-    expect(r.total_s).toBeCloseTo(r.nodeTime.E, 6);
+    // E est au fond de la vallée derrière J : l'eau y arrive dès que J est franchi, puis la vallée se remplit
+    expect(r.nodeTime.E).toBeCloseTo(r.nodeTime.J, 6);
+    expect(r.total_s).toBeCloseTo((vol(200) + vol(1000) + vol(500)) / rate, 3);
     expect(r.volume_m3).toBeCloseTo(vol(1700), 6);
     expect(formatDuree(3723)).toBe('1 h 02 min');
   });
@@ -63,9 +64,38 @@ describe('simulation du remplissage', () => {
     const r = simulateFilling(net);
     const tB = vol(1000) / (36 / 3600);
     expect(r.boosters.B.depart_s).toBeCloseTo(tB, 3);
-    expect(r.nodeTime.H).toBeCloseTo(tB + vol(500) / (18 / 3600), 3);
+    expect(r.nodeTime.H).toBeCloseTo(tB, 3); // H, plus bas que le booster, reçoit l'eau dès son démarrage
+    expect(r.boosters.B.fin_s).toBeCloseTo(tB + vol(500) / (18 / 3600), 3);
     // booster arrêté : la zone reste vide
     net.nodes[1].en_marche = false;
     expect(simulateFilling(net).nodeTime.H).toBeUndefined();
+  });
+
+  it('piste gravitaire derrière un point haut : rien ne s’y remplit tant que le versant n’est pas plein', () => {
+    const net = net0(); // usine à 1000 m
+    const N = (id: string, z: number) => makeNode('jonction', 45, 6, net.params, { id, altitude_m: z });
+    net.nodes.push(N('A', 1100), N('D', 1050), N('C', 1200), N('G1', 1150), N('G2', 1080), N('G3', 1010), N('X', 1190));
+    const P = (id: string, a: string, b: string, L = 300) => makePipe(a, b, spec, { id, longueur_auto: false, longueur_m: L });
+    net.pipes.push(
+      P('v1', 'SM', 'A'), // versant : monte à 1100
+      P('v2', 'A', 'D'), // creux à 1050
+      P('v3', 'D', 'C'), // remonte au point haut 1200
+      P('b1', 'SM', 'X'), // autre branche côté usine, jusqu'à 1190
+      P('g1', 'C', 'G1'), // piste gravitaire : redescend
+      P('g2', 'G1', 'G2'),
+      P('g3', 'G2', 'G3'),
+    );
+    const r = simulateFilling(net);
+    const t = r.nodeTime;
+    // le versant et l'autre branche (sous le point haut) sont pleins avant toute la piste gravitaire
+    const versant = Math.max(t.A, t.D, t.C, t.X);
+    expect(Math.min(t.G1, t.G2, t.G3)).toBeGreaterThanOrEqual(versant);
+    // le creux D (1050) se remplit après avoir franchi A (1100)
+    expect(t.D).toBeGreaterThanOrEqual(t.A);
+    // la piste gravitaire se remplit par le bas
+    expect(t.G3).toBeLessThan(t.G2);
+    expect(t.G2).toBeLessThan(t.G1);
+    // l'eau stagne au point haut : C est atteint avant le bas de la piste
+    expect(t.C).toBeLessThanOrEqual(t.G3);
   });
 });

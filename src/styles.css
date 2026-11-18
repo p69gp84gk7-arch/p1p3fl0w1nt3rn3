@@ -1996,3 +1996,18 @@ table.mini tbody tr {
     flex-wrap: wrap;
   }
 }
+
+.unsaved-banner {
+  background: #eef6ff;
+  border-color: #c8dcf1;
+  bottom: 124px;
+}
+@media (max-width: 800px) {
+  .unsaved-banner {
+    bottom: 70px;
+  }
+}
+.btn.unsaved {
+  border-color: #e0a106;
+  background: #fff6e0;
+}

@@ -81,6 +81,24 @@ export function saveLocalNetwork(net: Network) {
 }
 
 const PRISTINE_KEY = 'pipeflow-neige:reference-intacte';
+const SOURCE_KEY = 'pipeflow-neige:source';
+const DIRTY_KEY = 'pipeflow-neige:modifs-non-enregistrees';
+
+/** Origine du réseau affiché : réseau de la station, Google Sheets ou fichier importé. */
+export type NetworkSource = 'reference' | 'sheets' | 'fichier';
+export function getSource(): NetworkSource | null {
+  return safeGet(SOURCE_KEY) as NetworkSource | null;
+}
+export function setSource(s: NetworkSource) {
+  safeSet(SOURCE_KEY, s);
+}
+/** Des modifications faites sur cet appareil n'ont pas encore été enregistrées dans Google Sheets. */
+export function hasUnsavedChanges(): boolean {
+  return safeGet(DIRTY_KEY) === '1';
+}
+export function setUnsavedChanges(v: boolean) {
+  safeSet(DIRTY_KEY, v ? '1' : '0');
+}
 
 /** Le réseau de la station n'a pas été modifié sur cet appareil depuis son chargement. */
 export function isReferencePristine(): boolean {

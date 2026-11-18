@@ -9,6 +9,14 @@ import type { Couronnes, Layer, Network, PipeSpec } from '../model/types';
 import { COURONNES } from '../model/types';
 import { normalizeNetwork } from '../services/storage';
 import Modal from './Modal';
+import { setSource, setUnsavedChanges } from '../services/storage';
+
+/** Réseau remplacé par un import : à enregistrer dans Google Sheets. */
+function markImported() {
+  setSource('fichier');
+  setUnsavedChanges(true);
+  useStore.getState().set('unsaved', true);
+}
 import { REFERENCE_FILES } from '../data/reference';
 
 type PType = ImportType;
@@ -118,6 +126,7 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
               className="btn primary"
               onClick={() => {
                 st().replaceNetwork(loaded.json!);
+                markImported();
                 st().toast('Réseau importé.', 'success');
                 onClose();
               }}
@@ -277,7 +286,10 @@ function KmlConfig({ loaded, net, onBack, onDone }: { loaded: Loaded; net: Netwo
       next = { ...next, nodes: f.nodes, modeles: f.modeles };
       csvMsg = ` Débits CSV : ${f.report.rattaches} enneigeurs.`;
     }
-    if (mode === 'remplacer') st().replaceNetwork(next);
+    if (mode === 'remplacer') {
+      st().replaceNetwork(next);
+      markImported();
+    }
     else {
       st().commit(next);
       st().set('fitToken', st().fitToken + 1);

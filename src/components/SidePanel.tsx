@@ -14,6 +14,7 @@ import { staticNetwork } from '../model/scenario';
 import { pressurize, stopPressurize } from './pressurize';
 import { formatDuree } from '../hydraulics/remplissage';
 import { REFERENCE_NAME, REFERENCE_VERSION } from '../data/reference';
+import { getSource } from '../services/storage';
 
 export default function SidePanel() {
   const selection = useStore((s) => s.selection);
@@ -959,7 +960,8 @@ function StationCard({ node: n }: { node: NetNode }) {
 export function ReferenceBanner() {
   const params = useStore((s) => s.net.params);
   const [hidden, setHidden] = useState(false);
-  const fromReference = params.reference_version !== '' || params.nom_projet === REFERENCE_NAME;
+  const source = getSource();
+  const fromReference = source !== 'sheets' && source !== 'fichier' && (params.reference_version !== '' || params.nom_projet === REFERENCE_NAME);
   if (hidden || !fromReference || params.reference_version === REFERENCE_VERSION) return null;
   return (
     <div className="ref-banner">
@@ -1026,5 +1028,33 @@ function FillReport() {
       ))}
       <p className="small muted">Temps calculés à partir du volume des canalisations (diamètres{net.pipes.some((p) => p.diametre_estime) ? ' en partie estimés' : ''}) et des débits de remplissage.</p>
     </details>
+  );
+}
+
+/** Rappel : modifications locales non enregistrées dans Google Sheets. */
+export function UnsavedBanner() {
+  const unsaved = useStore((s) => s.unsaved);
+  const sheetsUrl = useStore((s) => s.settings.sheetsUrl);
+  const filling = useStore((s) => s.filling);
+  const [hidden, setHidden] = useState(false);
+  if (!unsaved || !sheetsUrl || hidden || filling) return null;
+  return (
+    <div className="ref-banner unsaved-banner">
+      <span>☁️ Modifications non enregistrées dans Google Sheets.</span>
+      <button className="btn small primary" onClick={() => void useStore.getState().saveSheets()}>
+        Enregistrer
+      </button>
+      <button
+        className="btn small"
+        onClick={() => {
+          if (confirm('Abandonner les modifications de cet appareil et recharger le réseau de Google Sheets ?')) void useStore.getState().loadSheets();
+        }}
+      >
+        Recharger Sheets
+      </button>
+      <button className="btn small" onClick={() => setHidden(true)}>
+        ✕
+      </button>
+    </div>
   );
 }

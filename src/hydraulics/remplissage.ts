@@ -50,69 +50,131 @@ interface Seg {
   zone: string | null;
 }
 
-/** Ordre de remplissage : arbre de « niveau de passage » (minimax) depuis les sources. */
-function floodOrder(segs: Seg[], sources: { id: string; z: number }[], hmax: number): Seg[] {
-  const adj = new Map<string, { to: string; z: number }[]>();
-  const zOf = new Map<string, number>();
-  for (const s of segs) {
-    zOf.set(s.u, s.zu);
-    zOf.set(s.v, s.zv);
-    (adj.get(s.u) ?? adj.set(s.u, []).get(s.u)!).push({ to: s.v, z: s.zv });
-    (adj.get(s.v) ?? adj.set(s.v, []).get(s.v)!).push({ to: s.u, z: s.zu });
+class MinHeap {
+  private h: [number, number, string][] = [];
+  get size() {
+    return this.h.length;
   }
-  const key = new Map<string, number>();
-  const heap: [number, string][] = [];
-  const push = (k: number, id: string) => {
-    heap.push([k, id]);
-    let i = heap.length - 1;
+  push(k1: number, k2: number, id: string) {
+    const h = this.h;
+    h.push([k1, k2, id]);
+    let i = h.length - 1;
     while (i > 0) {
       const p = (i - 1) >> 1;
-      if (heap[p][0] <= heap[i][0]) break;
-      [heap[p], heap[i]] = [heap[i], heap[p]];
+      if (h[p][0] < h[i][0] || (h[p][0] === h[i][0] && h[p][1] <= h[i][1])) break;
+      [h[p], h[i]] = [h[i], h[p]];
       i = p;
     }
-  };
-  const pop = (): [number, string] => {
-    const top = heap[0];
-    const last = heap.pop()!;
-    if (heap.length) {
-      heap[0] = last;
+  }
+  pop(): [number, number, string] {
+    const h = this.h;
+    const top = h[0];
+    const last = h.pop()!;
+    if (h.length) {
+      h[0] = last;
       let i = 0;
+      const less = (a: number, b: number) => h[a][0] < h[b][0] || (h[a][0] === h[b][0] && h[a][1] < h[b][1]);
       for (;;) {
         const l = 2 * i + 1;
         const r = l + 1;
         let m = i;
-        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (l < h.length && less(l, m)) m = l;
+        if (r < h.length && less(r, m)) m = r;
         if (m === i) break;
-        [heap[m], heap[i]] = [heap[i], heap[m]];
+        [h[m], h[i]] = [h[i], h[m]];
         i = m;
       }
     }
     return top;
-  };
-  for (const s of sources) {
-    key.set(s.id, s.z);
-    push(s.z, s.id);
   }
-  const done = new Set<string>();
-  while (heap.length) {
-    const [k, u] = pop();
-    if (done.has(u) || k > (key.get(u) ?? Infinity)) continue;
-    done.add(u);
-    for (const { to, z } of adj.get(u) ?? []) {
-      const nk = Math.max(k, z);
-      if (nk > hmax) continue;
-      if (nk < (key.get(to) ?? Infinity)) {
-        key.set(to, nk);
-        push(nk, to);
+}
+
+/**
+ * Ordre de remplissage des tronçons, par débordement :
+ *  • l'eau entre en `entry` et descend jusqu'au point bas le plus proche ;
+ *  • le niveau monte alors dans toute la cuvette reliée (tous les versants
+ *    sous le niveau courant se remplissent, du plus bas au plus haut) ;
+ *  • arrivée à un point haut, l'eau y stagne : de l'autre côté, la descente
+ *    (ex. piste gravitaire) se remplit entièrement par le bas avant que le
+ *    niveau ne reprenne sa montée ;
+ *  • rien ne se remplit au-dessus de `hmax` (pression de refoulement).
+ */
+function floodOrder(segs: Seg[], entry: { id: string; z: number }, hmax: number): Seg[] {
+  const adj = new Map<string, string[]>();
+  const zOf = new Map<string, number>();
+  zOf.set(entry.id, entry.z);
+  for (const s of segs) {
+    zOf.set(s.u, s.zu);
+    zOf.set(s.v, s.zv);
+    (adj.get(s.u) ?? adj.set(s.u, []).get(s.u)!).push(s.v);
+    (adj.get(s.v) ?? adj.set(s.v, []).get(s.v)!).push(s.u);
+  }
+  const z = (id: string) => zOf.get(id)!;
+  const rank = new Map<string, number>();
+  let counter = 0;
+  const wet = (id: string) => rank.set(id, counter++);
+  const ek = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  /** Tronçons partant d'un point de débordement : pleins seulement quand la cuvette atteint ce point. */
+  const edgeRank = new Map<string, number>();
+
+  /** Remplit la région `allowed` à partir de `start` (déjà mouillé), sans dépasser le niveau `limit`. */
+  const fillFrom = (start: string, allowed: (id: string) => boolean, limit: number) => {
+    const heap = new MinHeap();
+    const queued = new Set<string>();
+    const pushNb = (u: string) => {
+      for (const v of adj.get(u) ?? []) {
+        if (rank.has(v) || queued.has(v) || !allowed(v)) continue;
+        queued.add(v);
+        heap.push(z(v), 0, v);
       }
+    };
+    /**
+     * Débordement en `v` (niveau `lvl`) : chaque descente qui part de v forme
+     * une cuvette ; l'eau y ruisselle jusqu'au point bas et la remplit par le
+     * bas jusqu'au niveau de v. Ses bords plus hauts rejoignent ensuite la
+     * montée générale.
+     */
+    const spill = (v: string, lvl: number) => {
+      for (const w of adj.get(v) ?? []) {
+        if (rank.has(w) || !allowed(w) || z(w) >= lvl) continue;
+        const basin = new Set<string>([w]);
+        const st = [w];
+        while (st.length) {
+          const x = st.pop()!;
+          for (const y of adj.get(x) ?? []) {
+            if (!basin.has(y) && !rank.has(y) && allowed(y) && z(y) < lvl) {
+              basin.add(y);
+              st.push(y);
+            }
+          }
+        }
+        let sink = w;
+        for (const x of basin) if (z(x) < z(sink)) sink = x;
+        wet(sink);
+        fillFrom(sink, (id) => basin.has(id), lvl);
+        const full = counter++;
+        for (const y of adj.get(v) ?? []) if (basin.has(y)) edgeRank.set(ek(v, y), full);
+        for (const x of basin) pushNb(x);
+      }
+    };
+    spill(start, z(start));
+    pushNb(start);
+    while (heap.size) {
+      const [zv, , v] = heap.pop();
+      if (rank.has(v)) continue;
+      if (zv > limit) break;
+      wet(v);
+      spill(v, zv);
+      pushNb(v);
     }
-  }
+  };
+
+  wet(entry.id);
+  fillFrom(entry.id, () => true, hmax);
   return segs
-    .filter((s) => key.has(s.u) && key.has(s.v))
-    .map((s) => ({ s, k: Math.max(key.get(s.u)!, key.get(s.v)!), zl: Math.min(s.zu, s.zv) }))
-    .sort((a, b) => a.k - b.k || a.zl - b.zl)
+    .filter((s) => rank.has(s.u) && rank.has(s.v))
+    .map((s) => ({ s, r: edgeRank.get(ek(s.u, s.v)) ?? Math.max(rank.get(s.u)!, rank.get(s.v)!) }))
+    .sort((a, b) => a.r - b.r)
     .map((x) => x.s);
 }
 
@@ -174,11 +236,18 @@ export function simulateFilling(net: Network, onlyBooster?: string): FillResult 
   if (!onlyBooster) {
     if (!sdms.length) messages.push('Aucune salle des machines en marche.');
     const hmax = Math.max(...sdms.map((n) => n.altitude_m + n.pression_consigne_bar / barPerM));
-    const order = floodOrder(
-      segs.filter((s) => !s.zone),
-      sdms.map((n) => ({ id: n.id, z: n.altitude_m })),
-      hmax,
-    );
+    const mainSegs = segs.filter((s) => !s.zone);
+    // plusieurs usines : chacune remplit à partir de son point de départ
+    const order: Seg[] = [];
+    const seen = new Set<Seg>();
+    for (const n of sdms) {
+      for (const sg of floodOrder(mainSegs, { id: n.id, z: n.altitude_m }, hmax)) {
+        if (!seen.has(sg)) {
+          seen.add(sg);
+          order.push(sg);
+        }
+      }
+    }
     queues.push({ id: 'main', order, rate: mainRate, start: 0, i: 0, left: order[0]?.volume ?? 0, started: true, finished: !order.length });
     if (!(mainRate > 0) && order.length) messages.push('Débit de remplissage de l’usine nul : renseignez-le dans le panneau Pompage.');
   }
@@ -188,7 +257,7 @@ export function simulateFilling(net: Network, onlyBooster?: string): FillResult 
     if (!bn || bn.en_marche === false) continue;
     const order = floodOrder(
       segs.filter((s) => s.zone === b),
-      [{ id: b, z: bn.altitude_m }],
+      { id: b, z: bn.altitude_m },
       bn.altitude_m + bn.pression_consigne_bar / barPerM,
     );
     const rate = Math.max(bn.debit_remplissage_m3h || 0, 0) / 3600;
@@ -201,10 +270,18 @@ export function simulateFilling(net: Network, onlyBooster?: string): FillResult 
   const nodeTime: Record<string, number> = {};
   for (const s of sdms) nodeTime[s.id] = 0;
   if (onlyBooster) nodeTime[onlyBooster] = 0;
+  const setNode = (v: string, t: number) => {
+    if (nodes.has(v) && !(nodeTime[v] <= t)) nodeTime[v] = t;
+  };
+  /** Début du remplissage d'un tronçon : l'eau atteint son point bas. */
+  const begin = (s: Seg, t: number) => setNode(s.zu <= s.zv ? s.u : s.v, t);
+  /** Tronçon plein : l'eau atteint son point haut. */
   const mark = (s: Seg, t: number) => {
     segTime.set(s, t);
-    for (const v of [s.u, s.v]) if (nodes.has(v) && !(nodeTime[v] <= t)) nodeTime[v] = t;
+    setNode(s.u, t);
+    setNode(s.v, t);
   };
+  for (const q of queues) if (q.started && q.order.length) begin(q.order[0], 0);
   let t = 0;
   const main = queues.find((q) => q.id === 'main');
   for (let guard = 0; guard < 1e6; guard++) {
@@ -213,6 +290,7 @@ export function simulateFilling(net: Network, onlyBooster?: string): FillResult 
       if (!q.started && q.id !== 'main' && nodeTime[q.id] !== undefined && nodeTime[q.id] <= t) {
         q.started = true;
         q.start = nodeTime[q.id];
+        if (q.order.length) begin(q.order[0], t);
       }
     }
     const active = queues.filter((q) => q.started && !q.finished);
@@ -242,7 +320,10 @@ export function simulateFilling(net: Network, onlyBooster?: string): FillResult 
         mark(q.order[q.i], t);
         q.i += 1;
         if (q.i >= q.order.length) q.finished = true;
-        else q.left += q.order[q.i].volume;
+        else {
+          q.left += q.order[q.i].volume;
+          begin(q.order[q.i], t);
+        }
       }
     }
   }

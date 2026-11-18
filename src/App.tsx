@@ -13,9 +13,9 @@ import HelpDialog from './components/HelpDialog';
 import { firstVisit, useStore } from './store';
 import MobileNav from './components/MobileNav';
 import FillClock from './components/FillClock';
-import { ReferenceBanner } from './components/SidePanel';
+import { ReferenceBanner, UnsavedBanner } from './components/SidePanel';
 import { REFERENCE_NAME, REFERENCE_VERSION } from './data/reference';
-import { isReferencePristine } from './services/storage';
+import { getSource, hasUnsavedChanges, isReferencePristine } from './services/storage';
 import { useIsMobile } from './components/useIsMobile';
 import { deleteNode, deletePipe } from './model/edit';
 
@@ -39,14 +39,23 @@ export default function App() {
     if (isMobile && tool.kind !== 'select' && useStore.getState().mobileSheet === 'outils') useStore.getState().set('mobileSheet', null);
   }, [isMobile, tool.kind]);
   useEffect(() => {
-    const s = useStore.getState();
-    const p = s.net.params;
-    const fromReference = p.reference_version !== '' || p.nom_projet === REFERENCE_NAME;
-    if (firstVisit) void s.loadReference();
-    // Réseau de la station non modifié sur cet appareil : mise à jour automatique.
-    else if (fromReference && p.reference_version !== REFERENCE_VERSION && isReferencePristine()) {
-      void s.loadReference().then(() => useStore.getState().toast('Réseau de la station mis à jour automatiquement.', 'success'));
-    }
+    void (async () => {
+      const s = useStore.getState();
+      // 1. Google Sheets configuré : on ouvre directement le réseau enregistré (corrigé),
+      //    sauf si des modifications de cet appareil n'y ont pas encore été enregistrées.
+      if (s.settings.sheetsUrl && !hasUnsavedChanges()) {
+        if (await s.loadSheets(true)) return;
+      }
+      const p = useStore.getState().net.params;
+      const fromReference = getSource() !== 'sheets' && getSource() !== 'fichier' && (p.reference_version !== '' || p.nom_projet === REFERENCE_NAME);
+      // 2. Première visite : réseau de la station.
+      if (firstVisit) await s.loadReference();
+      // 3. Réseau de la station non modifié sur cet appareil : mise à jour automatique.
+      else if (fromReference && p.reference_version !== REFERENCE_VERSION && isReferencePristine()) {
+        await s.loadReference();
+        useStore.getState().toast('Réseau de la station mis à jour automatiquement.', 'success');
+      }
+    })();
   }, []);
 
   return (
@@ -60,6 +69,7 @@ export default function App() {
           <ToolHint />
           <FillClock />
           <ReferenceBanner />
+          <UnsavedBanner />
           {empty && !busy && <Welcome openDialog={setDialog} />}
           <BottomDrawer />
         </div>

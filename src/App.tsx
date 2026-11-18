@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import MapView from './components/MapView';
+import MapDisplayPanel from './components/MapDisplayPanel';
 import TopBar from './components/TopBar';
 import Toolbar from './components/Toolbar';
 import SidePanel from './components/SidePanel';
@@ -32,6 +33,7 @@ export default function App() {
         <Toolbar />
         <div className="map-area">
           <MapView />
+          {!empty && <MapDisplayPanel />}
           <ToolHint />
           {empty && !busy && <Welcome openDialog={setDialog} />}
           <BottomDrawer />

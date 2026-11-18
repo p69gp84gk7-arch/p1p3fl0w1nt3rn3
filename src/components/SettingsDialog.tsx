@@ -5,6 +5,7 @@ import { NumField, Row, TextField } from './fields';
 import { pingSheets } from '../services/sheets';
 import type { GunModel, Params, PipeSpec } from '../model/types';
 import type { ElevationSource } from '../services/elevation';
+import { applyMinPressures, isBP, isConsumer } from '../model/defaults';
 
 type Tab = 'sheets' | 'calcul' | 'catalogue' | 'modeles';
 
@@ -119,6 +120,21 @@ function CalcTab() {
         <Row label="Pression mini par défaut">
           <NumField value={params.pression_min_defaut_bar} unit="bar" onChange={(v) => up({ pression_min_defaut_bar: v })} />
         </Row>
+        <Row label="Pression mini des canons BP">
+          <NumField
+            value={params.pression_min_bp_bar}
+            unit="bar"
+            onChange={(v) => {
+              const cur = st().net;
+              const next = { ...cur, params: { ...cur.params, pression_min_bp_bar: v } };
+              st().commit({ ...next, nodes: next.nodes.map((n) => (isConsumer(n.type) && isBP(n) ? { ...n, pression_min_bar: v } : n)) });
+            }}
+          />
+        </Row>
+        <p className="small muted">Canons « BP » : « BP » dans le nom (ex. BP179), le modèle, la priorité ou les notes.</p>
+        <Row label="Curseur de pression jusqu’à">
+          <NumField value={params.pression_max_curseur_bar} unit="bar" digits={0} onChange={(v) => up({ pression_max_curseur_bar: v })} />
+        </Row>
         <p className="small muted">
           Pertes de charge : Darcy-Weisbach (λ de Swamee-Jain) + pertes singulières K·V²/2g. Résolution par la méthode du gradient global (EPANET), réseaux ramifiés et maillés.
         </p>
@@ -216,9 +232,25 @@ function ModelsTab() {
   const modeles = useStore((s) => s.net.modeles);
   const st = useStore.getState;
   return (
+    <>
+    <p className="small muted">
+      La <b>pression mini</b> d’un modèle s’applique automatiquement à tous ses canons (sauf les canons BP, réglés dans « Calcul & altitudes »).
+    </p>
     <EditableTable<GunModel>
       rows={modeles}
-      onChange={(rows) => st().commit({ ...st().net, modeles: rows })}
+      onChange={(rows) => {
+        const cur = st().net;
+        const changed = new Map<string, number>();
+        rows.forEach((m) => {
+          const old = cur.modeles.find((x) => x.modele === m.modele);
+          if (old && old.pression_min_bar !== m.pression_min_bar) changed.set(m.modele, m.pression_min_bar);
+        });
+        st().commit({
+          ...cur,
+          modeles: rows,
+          nodes: cur.nodes.map((n) => (isConsumer(n.type) && !isBP(n) && changed.has(n.modele) ? { ...n, pression_min_bar: changed.get(n.modele)! } : n)),
+        });
+      }}
       make={() => ({ modele: 'Nouveau modèle', type: 'perche', debit_nominal_m3h: 15, debit_min_m3h: 3, debit_max_m3h: 25, pression_min_bar: 15, pression_max_bar: 60, k_buse: 2.5 })}
       cols={[
         { key: 'modele', label: 'Modèle' },
@@ -231,5 +263,15 @@ function ModelsTab() {
         { key: 'k_buse', label: 'k buse', num: true },
       ]}
     />
+    <button
+      className="btn small"
+      onClick={() => {
+        st().commit(applyMinPressures(st().net));
+        st().toast('Pressions mini appliquées à tous les canons.', 'success');
+      }}
+    >
+      ↺ Réappliquer les pressions mini à tous les canons
+    </button>
+    </>
   );
 }

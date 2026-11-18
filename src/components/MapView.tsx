@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import { MapContainer, Marker, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import { useStore } from '../store';
 import { pipePath } from '../model/geo';
 import { addNode, connect, nearestPipe, nodeMapOf, reconnect, splitPipe } from '../model/edit';
 import type { GeoPoint, NetNode, Network, Pipe } from '../model/types';
-import { BASE_LAYERS, binColor, categoryColor, DN_BINS, fmt, nodeIcon, PISTES_OVERLAY, pipeWeight, PRESSURE_BINS, resultLabel, STATUS_COLOR, VELOCITY_BINS } from './display';
+import { BASE_LAYERS, binColor, categoryColor, DN_BINS, DRY_COLOR, fmt, nodeIcon, PISTES_OVERLAY, pipeWeight, PRESSURE_BINS, STATUS_COLOR, VELOCITY_BINS } from './display';
+import { nodeBubble, pipeLabel } from './labels';
+import { pipeProfile } from '../hydraulics/solver';
+import { isConsumer } from '../model/defaults';
+
+const BAR_PER_M = 0.0980638;
 import { NODE_LABEL } from '../model/defaults';
 import { profilePath } from './profile';
 
@@ -73,12 +78,10 @@ function NetworkLayers() {
   const map = useMap();
   const net = useStore((s) => s.net);
   const results = useStore((s) => s.results);
-  const stale = useStore((s) => s.stale);
   const selection = useStore((s) => s.selection);
   const tool = useStore((s) => s.tool);
   const colorBy = useStore((s) => s.colorBy);
-  const showLabels = useStore((s) => s.showLabels);
-  const showResults = useStore((s) => s.showResults);
+  const settings = useStore((s) => s.settings);
   const activeLayer = useStore((s) => s.activeLayer);
   const drawSpec = useStore((s) => s.drawSpec);
   const bottomTab = useStore((s) => s.bottomTab);
@@ -238,7 +241,8 @@ function NetworkLayers() {
   };
 
   // ----- couleurs -----
-  const showRes = results && !stale ? results : results;
+  const showRes = results;
+  const fill = colorBy === 'remplissage';
   const pipeColor = (p: Pipe): string => {
     const r = showRes?.pipes[p.id];
     switch (colorBy) {
@@ -250,6 +254,8 @@ function NetworkLayers() {
         return r ? binColor(VELOCITY_BINS, r.vitesse_m_s) : '#1c5c9e';
       case 'pression':
         return r ? binColor(PRESSURE_BINS, r.pression_min_bar) : '#1c5c9e';
+      case 'remplissage':
+        return DRY_COLOR;
       case 'secteur': {
         const a = nodes.get(p.aval);
         return categoryColor(a?.secteur || nodes.get(p.amont)?.secteur || '');
@@ -260,7 +266,7 @@ function NetworkLayers() {
   };
   const nodeColor = (n: NetNode): string => {
     const r = showRes?.nodes[n.id];
-    if (n.type === 'salle_machines') return '#1c3f6e';
+    if (n.type === 'salle_machines') return n.en_marche === false ? '#8796a5' : '#1c3f6e';
     switch (colorBy) {
       case 'calque':
         return layers.get(n.calque)?.couleur ?? '#1c5c9e';
@@ -268,6 +274,8 @@ function NetworkLayers() {
         return categoryColor(n.secteur);
       case 'pression':
         return r ? binColor(PRESSURE_BINS, r.pression_bar) : '#5d6d7e';
+      case 'remplissage':
+        return r && r.pression_bar >= 0 ? binColor(PRESSURE_BINS, r.pression_bar) : DRY_COLOR;
       case 'diametre':
       case 'vitesse':
         return '#5d6d7e';
@@ -278,9 +286,36 @@ function NetworkLayers() {
     }
   };
 
-  const labelsOn = showLabels && zoom >= 15;
-  const resultsOn = showResults && !!showRes && zoom >= 15;
-  const pipeResultsOn = showResults && !!showRes && zoom >= 16;
+  /** Mode niveau d'eau : morceaux de tracé pleins (colorés par pression) ou vides. */
+  const waterSegments = (p: Pipe): { pts: [number, number][]; P: number }[] => {
+    const r = showRes?.pipes[p.id];
+    const prof = pipeProfile(p, nodes);
+    if (prof.length < 2) return [];
+    if (!r || !Number.isFinite(r.charge_amont_m) || !Number.isFinite(r.charge_aval_m)) {
+      return [{ pts: prof.map((q) => [q.lat, q.lon]), P: NaN }];
+    }
+    const L = prof[prof.length - 1].s || 1;
+    const P = prof.map((q) => (r.charge_amont_m + ((r.charge_aval_m - r.charge_amont_m) * q.s) / L - q.z) * BAR_PER_M);
+    const out: { pts: [number, number][]; P: number }[] = [];
+    for (let i = 0; i < prof.length - 1; i++) {
+      const a = prof[i];
+      const b = prof[i + 1];
+      if (P[i] >= 0 === P[i + 1] >= 0) {
+        out.push({ pts: [[a.lat, a.lon], [b.lat, b.lon]], P: (P[i] + P[i + 1]) / 2 });
+      } else {
+        const t = P[i] / (P[i] - P[i + 1]);
+        const m: [number, number] = [a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t];
+        out.push({ pts: [[a.lat, a.lon], m], P: P[i] >= 0 ? P[i] / 2 : -1 });
+        out.push({ pts: [m, [b.lat, b.lon]], P: P[i + 1] >= 0 ? P[i + 1] / 2 : -1 });
+      }
+    }
+    return out;
+  };
+
+  const bubblesOn = settings.nodeLabels.length > 0 && (settings.labelsAlways || zoom >= 15);
+  const pipeLabelsOn = settings.pipeLabels.length > 0 && (settings.labelsAlways || zoom >= 16);
+  const wantsBubble = (n: NetNode) =>
+    n.type === 'jonction' ? settings.labelJunctions : isConsumer(n.type) ? settings.labelGuns : settings.labelOthers;
   const draggable = tool.kind === 'move';
   const startNode = drawing ? nodes.get(drawing.start) : undefined;
 
@@ -294,57 +329,62 @@ function NetworkLayers() {
         const excluded = layers.get(p.calque)?.calcul === false;
         const w = pipeWeight(p.dn);
         const r = showRes?.pipes[p.id];
+        const label = pipeLabelsOn ? pipeLabel(p, r, settings.pipeLabels) : '';
+        const segs = fill && !sel && !inProfile ? waterSegments(p) : null;
         return (
-          <Polyline
-            key={p.id + (sel ? '-s' : '') + (inProfile ? '-p' : '')}
-            positions={path.map((g) => [g[0], g[1]] as [number, number])}
-            renderer={canvas}
-            bubblingMouseEvents={false}
-            pathOptions={{
-              color: sel ? '#111827' : inProfile ? '#7b4fb8' : pipeColor(p),
-              weight: sel ? w + 3 : inProfile ? w + 2 : w,
-              opacity: excluded ? 0.6 : 0.95,
-              dashArray: p.statut === 'fermee' ? '2 8' : excluded ? '10 6' : undefined,
-              lineCap: 'round',
-            }}
-            eventHandlers={{ click: (e) => onPipeClick(p, e.latlng) }}
-          >
-            {pipeResultsOn && r && r.vitesse_m_s > 0.005 ? (
-              <Tooltip key="res" permanent direction="center" className="pipe-result" opacity={1}>
-                {fmt(r.vitesse_m_s, 1)} m/s
-              </Tooltip>
-            ) : (
-            <Tooltip key="info" sticky direction="top" opacity={0.95}>
-              <strong>{p.nom || p.id}</strong> · DN{p.dn} {p.materiau}
-              {r && Number.isFinite(r.pression_max_bar) && (
-                <>
-                  <br />
-                  {fmt(Math.abs(r.debit_m3h), 1)} m³/h · {fmt(r.vitesse_m_s, 2)} m/s · {fmt(r.perte_m_km, 1)} m/km
-                </>
+          <Fragment key={p.id}>
+            <Polyline
+              key={p.id + (sel ? '-s' : '') + (inProfile ? '-p' : '') + (segs ? '-f' : '')}
+              positions={path.map((g) => [g[0], g[1]] as [number, number])}
+              renderer={canvas}
+              bubblingMouseEvents={false}
+              pathOptions={{
+                color: sel ? '#111827' : inProfile ? '#7b4fb8' : pipeColor(p),
+                weight: sel ? w + 3 : inProfile ? w + 2 : segs ? w + 2 : w,
+                opacity: segs ? 0.35 : excluded ? 0.6 : 0.95,
+                dashArray: p.statut === 'fermee' ? '2 8' : excluded ? '10 6' : undefined,
+                lineCap: 'round',
+              }}
+              eventHandlers={{ click: (e) => onPipeClick(p, e.latlng) }}
+            >
+              {label ? (
+                <Tooltip key="res" permanent direction="center" className="pipe-result" opacity={1}>
+                  {label}
+                </Tooltip>
+              ) : (
+                <Tooltip key="info" sticky direction="top" opacity={0.95}>
+                  <strong>{p.nom || p.id}</strong> · DN{p.dn} {p.materiau}
+                  {r && Number.isFinite(r.pression_max_bar) && (
+                    <>
+                      <br />
+                      {fmt(Math.abs(r.debit_m3h), 1)} m³/h · {fmt(r.vitesse_m_s, 2)} m/s · {fmt(r.perte_m_km, 1)} m/km
+                      <br />
+                      Pression {fmt(r.pression_min_bar, 1)} à {fmt(r.pression_max_bar, 1)} bar
+                    </>
+                  )}
+                </Tooltip>
               )}
-            </Tooltip>
+            </Polyline>
+            {segs?.map((sg, i) =>
+              sg.P >= 0 ? (
+                <Polyline key={i} positions={sg.pts} renderer={canvas} interactive={false} pathOptions={{ color: binColor(PRESSURE_BINS, sg.P), weight: w, opacity: 1, lineCap: 'round' }} />
+              ) : null,
             )}
-          </Polyline>
+          </Fragment>
         );
       })}
 
       {net.nodes.filter(visibleNode).map((n) => {
         const sel = selection?.kind === 'node' && selection.id === n.id;
         const r = showRes?.nodes[n.id];
-        const inactive = (n.type === 'enneigeur' || n.type === 'regard') && !n.actif;
+        const inactive = (isConsumer(n.type) && !n.actif) || (n.type !== 'vanne' && n.en_marche === false && !isConsumer(n.type) && n.type !== 'jonction');
         const closed = n.type === 'vanne' && !n.actif;
+        const bubble = bubblesOn && wantsBubble(n) ? nodeBubble(n, r, settings.nodeLabels) : '';
         return (
           <Marker
             key={n.id}
             position={[n.lat, n.lon]}
-            icon={nodeIcon(
-              n.type,
-              nodeColor(n),
-              sel,
-              inactive || closed,
-              labelsOn ? n.nom : undefined,
-              resultsOn && r && n.type !== 'jonction' ? resultLabel(r.pression_bar, r.vitesse_arrivee_m_s) : undefined,
-            )}
+            icon={nodeIcon(n.type, nodeColor(n), sel, inactive || closed, bubble || undefined)}
             draggable={draggable && !locked(n.calque)}
             zIndexOffset={n.type === 'jonction' ? 0 : n.type === 'salle_machines' ? 1000 : 500}
             eventHandlers={{

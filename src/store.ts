@@ -17,7 +17,7 @@ export type Tool =
 
 export type Selection = { kind: 'node' | 'pipe'; id: string } | null;
 
-export type ColorBy = 'statut' | 'pression' | 'vitesse' | 'calque' | 'diametre' | 'secteur';
+export type ColorBy = 'statut' | 'pression' | 'remplissage' | 'vitesse' | 'calque' | 'diametre' | 'secteur';
 
 export interface Toast {
   id: number;
@@ -37,9 +37,6 @@ interface State {
   drawSpec: PipeSpec;
   scenario: string;
   colorBy: ColorBy;
-  showLabels: boolean;
-  /** Affiche pression / vitesse à côté des éléments sur la carte. */
-  showResults: boolean;
   settings: Settings;
   toasts: Toast[];
   past: Network[];
@@ -88,8 +85,6 @@ export const useStore = create<State>((set, get) => ({
   drawSpec: DEFAULT_PIPE_SPEC,
   scenario: '',
   colorBy: 'statut',
-  showResults: true,
-  showLabels: false,
   settings: loadSettings(),
   toasts: [],
   past: [],

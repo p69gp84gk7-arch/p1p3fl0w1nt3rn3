@@ -1,12 +1,13 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { couronneField, effectiveFlow, isConsumer, isRegulator, LAYER_COLORS, NODE_LABEL, NODE_TYPES } from '../model/defaults';
+import { couronneField, effectiveFlow, isBP, isConsumer, isRegulator, LAYER_COLORS, minPressureFor, NODE_LABEL, NODE_TYPES } from '../model/defaults';
 import { deleteNode, deletePipe, mergeAtNode, nodeMapOf, orientByFlow, reversePipe } from '../model/edit';
 import { pipeLength } from '../hydraulics/solver';
 import { COURONNES, type Couronnes, type Layer, type NetNode, type NodeType, type Pipe } from '../model/types';
 import { NumField, Row, Section, TextField, Toggle } from './fields';
-import { BASE_LAYERS, DN_BINS, fmt, PRESSURE_BINS, STATUS_COLOR, STATUS_LABEL, VELOCITY_BINS, type Bin } from './display';
+import { BASE_LAYERS, fmt, STATUS_COLOR, STATUS_LABEL } from './display';
 import { newId } from '../model/ids';
+import { REFERENCE_NAME, REFERENCE_VERSION } from '../data/reference';
 
 export default function SidePanel() {
   const selection = useStore((s) => s.selection);
@@ -64,7 +65,7 @@ function NodeEditor({ node }: { node: NetNode }) {
 
   const applyModel = (name: string) => {
     const m = net.modeles.find((x) => x.modele === name);
-    up(m ? { modele: name, pression_min_bar: m.pression_min_bar, k_buse: m.k_buse, debit_m3h: node.debit_m3h || m.debit_nominal_m3h } : { modele: name });
+    up(m ? { modele: name, pression_min_bar: minPressureFor({ ...node, modele: name }, net), k_buse: m.k_buse, debit_m3h: node.debit_m3h || m.debit_nominal_m3h } : { modele: name });
   };
 
   return (
@@ -199,9 +200,15 @@ function NodeEditor({ node }: { node: NetNode }) {
               <NumField value={node.k_buse} unit="m³/h/√bar" onChange={(v) => up({ k_buse: v })} disabled={locked} />
             </Row>
           )}
-          <Row label="Pression mini">
+          <Row label="Pression mini" hint={isBP(node) ? 'Canon BP (basse pression)' : 'Pression mini du modèle'}>
             <NumField value={node.pression_min_bar} unit="bar" digits={1} onChange={(v) => up({ pression_min_bar: v })} disabled={locked} />
+            {node.pression_min_bar !== minPressureFor(node, net) && (
+              <button className="btn small" disabled={locked} title={isBP(node) ? 'Pression mini des canons BP' : `Pression mini du modèle ${node.modele}`} onClick={() => up({ pression_min_bar: minPressureFor(node, net) })}>
+                ↺ {fmt(minPressureFor(node, net), 0)}
+              </button>
+            )}
           </Row>
+          {isBP(node) && <div className="small muted">Canon BP : pression mini {fmt(net.params.pression_min_bp_bar, 0)} bar.</div>}
           <Row label="Air">
             <NumField value={node.air} digits={1} onChange={(v) => up({ air: v })} disabled={locked} />
           </Row>
@@ -501,23 +508,8 @@ function DrawSpecPicker() {
   );
 }
 
-function Legend({ bins }: { bins: Bin[] }) {
-  return (
-    <ul className="legend">
-      {bins.map((b) => (
-        <li key={b.label}>
-          <i style={{ background: b.color }} /> {b.label}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function Overview() {
   const net = useStore((s) => s.net);
-  const colorBy = useStore((s) => s.colorBy);
-  const showLabels = useStore((s) => s.showLabels);
-  const showResults = useStore((s) => s.showResults);
   const settings = useStore((s) => s.settings);
   const results = useStore((s) => s.results);
   const st = useStore.getState;
@@ -529,6 +521,7 @@ function Overview() {
 
   return (
     <div className="overview">
+      <ReferenceUpdateNotice />
       <Section title="Réseau">
         <div className="stats">
           <div>
@@ -554,30 +547,7 @@ function Overview() {
 
       <LayersManager />
 
-      <Section title="Affichage">
-        <Row label="Colorer selon">
-          <select value={colorBy} onChange={(e) => st().set('colorBy', e.target.value as typeof colorBy)}>
-            <option value="statut">État (calcul)</option>
-            <option value="pression">Pression</option>
-            <option value="vitesse">Vitesse</option>
-            <option value="diametre">Diamètre</option>
-            <option value="calque">Calque</option>
-            <option value="secteur">Piste / secteur</option>
-          </select>
-        </Row>
-        {colorBy === 'statut' && (
-          <ul className="legend">
-            {(['ok', 'alerte', 'erreur', 'isole'] as const).map((k) => (
-              <li key={k}>
-                <i style={{ background: STATUS_COLOR[k] }} /> {STATUS_LABEL[k]}
-              </li>
-            ))}
-            {!results && <li className="muted small">Lancez un calcul pour colorer le réseau.</li>}
-          </ul>
-        )}
-        {colorBy === 'pression' && <Legend bins={PRESSURE_BINS} />}
-        {colorBy === 'vitesse' && <Legend bins={VELOCITY_BINS} />}
-        {colorBy === 'diametre' && <Legend bins={DN_BINS} />}
+      <Section title="Fond de carte">
         <Row label="Fond de carte">
           <select value={settings.baseLayer} onChange={(e) => st().updateSettings({ baseLayer: e.target.value })}>
             {BASE_LAYERS.map((b) => (
@@ -590,12 +560,7 @@ function Overview() {
         <Row label="Pistes de ski">
           <Toggle checked={settings.showPistes} onChange={(v) => st().updateSettings({ showPistes: v })} />
         </Row>
-        <Row label="Noms des éléments">
-          <Toggle checked={showLabels} onChange={(v) => st().set('showLabels', v)} />
-        </Row>
-        <Row label="Pression / vitesse sur la carte">
-          <Toggle checked={showResults} onChange={(v) => st().set('showResults', v)} />
-        </Row>
+        <p className="small muted">Couleurs, contenu des bulles et légende : panneau « Affichage » en haut à gauche de la carte.</p>
       </Section>
 
       <Section title="Outils">
@@ -704,9 +669,6 @@ function LayersManager() {
 /** Réglage des stations de pompage : usine(s), surpresseurs, réducteurs. */
 function PumpingSection() {
   const net = useStore((s) => s.net);
-  const results = useStore((s) => s.results);
-  const stale = useStore((s) => s.stale);
-  const st = useStore.getState;
   const stations = net.nodes.filter((n) => n.type === 'salle_machines' || isRegulator(n.type));
   const order = { salle_machines: 0, surpresseur: 1, reducteur: 2 } as Record<string, number>;
   stations.sort((a, b) => order[a.type] - order[b.type]);
@@ -714,56 +676,165 @@ function PumpingSection() {
     <Section title="Pompage">
       {!stations.length && <p className="small muted">Aucune salle des machines : ajoutez-en une avec la barre d’outils.</p>}
       <div className="stations">
-        {stations.map((n) => {
-          const r = results?.nodes[n.id];
-          const locked = net.calques.find((l) => l.id === n.calque)?.verrouille;
-          const q = r && Number.isFinite(r.pression_bar) ? r.debit_m3h : NaN;
-          const load = n.debit_max_m3h > 0 && Number.isFinite(q) ? q / n.debit_max_m3h : NaN;
-          return (
-            <div key={n.id} className={`station ${r ? `st-${r.statut}` : ''}`}>
-              <div className="station-head">
-                <button className="linklike" onClick={() => st().setSelection({ kind: 'node', id: n.id })}>
-                  <b>{n.nom || n.id}</b>
-                </button>
-                <span className="muted small">
-                  {NODE_LABEL[n.type]} · {fmt(n.altitude_m, 0)} m
-                </span>
-              </div>
-              <Row label="Pression de refoulement" hint="Pression maintenue en sortie (variateur / régulation)">
-                <NumField value={n.pression_consigne_bar} unit="bar" digits={1} disabled={locked} onChange={(v) => st().updateNode(n.id, { pression_consigne_bar: v })} />
-              </Row>
-              {n.type !== 'reducteur' && (
-                <Row label="Débit maximal">
-                  <NumField value={n.debit_max_m3h} unit="m³/h" digits={0} disabled={locked} onChange={(v) => st().updateNode(n.id, { debit_max_m3h: v })} />
-                </Row>
-              )}
-              {r && Number.isFinite(q) && (
-                <div className={`station-result ${stale ? 'is-stale' : ''}`}>
-                  <div className="small">
-                    Débit calculé <b>{fmt(q, 0)} m³/h</b>
-                    {Number.isFinite(load) && <> · {fmt(load * 100, 0)} % du maximum</>}
-                  </div>
-                  {Number.isFinite(load) && (
-                    <div className="gauge">
-                      <i style={{ width: `${Math.min(load, 1) * 100}%`, background: load > 1 ? STATUS_COLOR.erreur : load > 0.9 ? STATUS_COLOR.alerte : STATUS_COLOR.ok }} />
-                    </div>
-                  )}
-                  {r.pression_aspiration_bar !== undefined && (
-                    <div className="small">
-                      Pression d’arrivée {fmt(r.pression_aspiration_bar, 1)} bar → refoulement {fmt(r.pression_bar, 1)} bar
-                    </div>
-                  )}
-                  {r.messages.map((m, i) => (
-                    <div key={i} className="small msg">
-                      {m}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {stations.map((n) => (
+          <StationCard key={n.id} node={n} />
+        ))}
       </div>
     </Section>
+  );
+}
+
+/** Pression appliquée sans entrée d'annulation, puis recalcul immédiat. */
+function livePressure(id: string, bar: number) {
+  const st = useStore.getState();
+  st.patchSilently((cur) => ({ ...cur, nodes: cur.nodes.map((x) => (x.id === id ? { ...x, pression_consigne_bar: bar } : x)) }));
+  st.runCalc();
+}
+
+let animTimer: number | undefined;
+
+function StationCard({ node: n }: { node: NetNode }) {
+  const net = useStore((s) => s.net);
+  const results = useStore((s) => s.results);
+  const stale = useStore((s) => s.stale);
+  const [anim, setAnim] = useState(false);
+  const st = useStore.getState;
+  const r = results?.nodes[n.id];
+  const locked = net.calques.find((l) => l.id === n.calque)?.verrouille;
+  const running = n.en_marche !== false;
+  const q = r && Number.isFinite(r.pression_bar) ? r.debit_m3h : NaN;
+  const load = n.debit_max_m3h > 0 && Number.isFinite(q) ? q / n.debit_max_m3h : NaN;
+  const maxBar = Math.max(net.params.pression_max_curseur_bar || 80, n.pression_consigne_bar);
+  const isSdm = n.type === 'salle_machines';
+  const waterLevel = n.altitude_m + n.pression_consigne_bar / 0.0980638;
+
+  const setRunning = (v: boolean) => {
+    st().updateNode(n.id, { en_marche: v });
+    st().runCalc();
+  };
+
+  /** Montée en pression progressive depuis 0 bar, en montrant le remplissage. */
+  const pressurize = () => {
+    window.clearInterval(animTimer);
+    const target = n.pression_consigne_bar > 0 ? n.pression_consigne_bar : 60;
+    const before = st().net;
+    st().commit({ ...before, nodes: before.nodes.map((x) => (x.id === n.id ? { ...x, en_marche: true } : x)) });
+    st().set('colorBy', 'remplissage');
+    setAnim(true);
+    const steps = 60;
+    let k = 0;
+    animTimer = window.setInterval(() => {
+      k += 1;
+      livePressure(n.id, Math.round(((target * k) / steps) * 10) / 10);
+      if (k >= steps) {
+        window.clearInterval(animTimer);
+        setAnim(false);
+      }
+    }, 120);
+  };
+  const stop = () => {
+    window.clearInterval(animTimer);
+    setAnim(false);
+  };
+  useEffect(() => () => window.clearInterval(animTimer), []);
+
+  return (
+    <div className={`station ${!running ? 'st-off' : r ? `st-${r.statut}` : ''}`}>
+      <div className="station-head">
+        <button className="linklike" onClick={() => st().setSelection({ kind: 'node', id: n.id })}>
+          <b>{n.nom || n.id}</b>
+        </button>
+        <span className="muted small">
+          {NODE_LABEL[n.type]} · {fmt(n.altitude_m, 0)} m
+        </span>
+      </div>
+      <div className="station-run">
+        <Toggle checked={running} disabled={locked} onChange={setRunning} label={running ? (isSdm ? 'Pompage en marche' : 'En service') : isSdm ? 'Pompage arrêté' : 'À l’arrêt (by-pass)'} />
+        {isSdm && (
+          <button className={`btn small ${anim ? '' : 'primary'}`} disabled={locked} onClick={anim ? stop : pressurize} title="Fait monter la pression de 0 jusqu’à la consigne en affichant le remplissage des canalisations">
+            {anim ? '■ Stop' : '▶ Mise en pression'}
+          </button>
+        )}
+      </div>
+      <Row label="Pression de refoulement" hint="Pression maintenue en sortie (variateur / régulation)">
+        <NumField value={n.pression_consigne_bar} unit="bar" digits={1} disabled={locked} onChange={(v) => { st().updateNode(n.id, { pression_consigne_bar: v }); st().runCalc(); }} />
+      </Row>
+      <div className="pressure-slider">
+        <input
+          type="range"
+          min={0}
+          max={maxBar}
+          step={0.5}
+          value={n.pression_consigne_bar}
+          disabled={locked || !running}
+          onPointerDown={() => {
+            stop();
+            st().commit(st().net);
+          }}
+          onChange={(e) => livePressure(n.id, Number(e.target.value))}
+          aria-label={`Pression de refoulement de ${n.nom}`}
+        />
+        <div className="slider-scale small muted">
+          <span>0</span>
+          <span>{fmt(maxBar / 2, 0)}</span>
+          <span>{fmt(maxBar, 0)} bar</span>
+        </div>
+      </div>
+      {running && (
+        <div className="small muted">
+          {isSdm ? 'L’eau peut monter jusqu’à' : 'Charge en sortie :'} <b>{fmt(waterLevel, 0)} m</b> d’altitude (sans débit)
+        </div>
+      )}
+      {n.type !== 'reducteur' && (
+        <Row label="Débit maximal">
+          <NumField value={n.debit_max_m3h} unit="m³/h" digits={0} disabled={locked} onChange={(v) => st().updateNode(n.id, { debit_max_m3h: v })} />
+        </Row>
+      )}
+      {r && running && Number.isFinite(q) && (
+        <div className={`station-result ${stale ? 'is-stale' : ''}`}>
+          <div className="small">
+            Débit calculé <b>{fmt(q, 0)} m³/h</b>
+            {Number.isFinite(load) && <> · {fmt(load * 100, 0)} % du maximum</>}
+          </div>
+          {Number.isFinite(load) && (
+            <div className="gauge">
+              <i style={{ width: `${Math.min(load, 1) * 100}%`, background: load > 1 ? STATUS_COLOR.erreur : load > 0.9 ? STATUS_COLOR.alerte : STATUS_COLOR.ok }} />
+            </div>
+          )}
+          {r.pression_aspiration_bar !== undefined && (
+            <div className="small">
+              Pression d’arrivée {fmt(r.pression_aspiration_bar, 1)} bar → refoulement {fmt(r.pression_bar, 1)} bar
+            </div>
+          )}
+          {r.messages.map((m, i) => (
+            <div key={i} className="small msg">
+              {m}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Propose de recharger le réseau de la station quand une nouvelle version est intégrée. */
+function ReferenceUpdateNotice() {
+  const params = useStore((s) => s.net.params);
+  const fromReference = params.reference_version !== '' || params.nom_projet === REFERENCE_NAME;
+  if (!fromReference || params.reference_version === REFERENCE_VERSION) return null;
+  return (
+    <div className="notice">
+      Une nouvelle version du réseau de la station est disponible (pressions mini, réglages…).
+      <div style={{ marginTop: 6 }}>
+        <button
+          className="btn small primary"
+          onClick={() => {
+            if (confirm('Recharger le réseau de la station ? Les modifications faites sur cet appareil seront remplacées (Ctrl+Z pour annuler).')) void useStore.getState().loadReference();
+          }}
+        >
+          Recharger le réseau de la station
+        </button>
+      </div>
+    </div>
   );
 }

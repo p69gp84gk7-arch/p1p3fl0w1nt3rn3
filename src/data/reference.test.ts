@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { readKmlFile } from '../import/kmz';
-import { buildReferenceNetwork, REFERENCE_FILES } from './reference';
+import { buildReferenceNetwork, REFERENCE_FILES, REFERENCE_VERSION } from './reference';
 import { referenceNetwork } from './referenceNetwork';
 import { solve } from '../hydraulics/solver';
 import { applyScenario } from '../model/scenario';
@@ -36,5 +36,32 @@ describe('réseau de référence intégré', () => {
     const r1 = solve(applyScenario(ref, lac));
     expect(r1.converged).toBe(true);
     expect(r1.totals.debit_total_m3h).toBeGreaterThan(100);
+  });
+
+  it('pressions mini : rubis 18 bar, BP 8 bar ; BP179 relié au n°179 du CSV', async () => {
+    const ref = await referenceNetwork();
+    const rubis = ref.nodes.filter((n) => n.type === 'enneigeur' && n.modele === 'rubis');
+    expect(rubis.length).toBeGreaterThan(100);
+    expect(rubis.every((n) => n.pression_min_bar === 18)).toBe(true);
+    const bp = ref.nodes.find((n) => n.nom === 'BP179')!;
+    expect(bp.pression_min_bar).toBe(8);
+    expect(bp.debit_c1c2c3).toBeGreaterThan(0);
+    expect(ref.nodes.filter((n) => /sectionnement/.test(n.notes)).every((n) => n.type === 'vanne')).toBe(true);
+    expect(ref.params.reference_version).toBe(REFERENCE_VERSION);
+  });
+
+  it('montée en pression : le niveau d’eau monte avec la pression de la salle des machines', async () => {
+    const ref = await referenceNetwork();
+    const sdm = ref.nodes.find((n) => n.type === 'salle_machines')!;
+    const wet = (bar: number) => {
+      const net = { ...ref, nodes: ref.nodes.map((n) => (n.id === sdm.id ? { ...n, pression_consigne_bar: bar } : n)) };
+      const r = solve(net);
+      return ref.nodes.filter((n) => r.nodes[n.id].pression_bar >= 0).length;
+    };
+    const w0 = wet(0);
+    const w20 = wet(20);
+    const w60 = wet(60);
+    expect(w0).toBeLessThan(w20);
+    expect(w20).toBeLessThan(w60);
   });
 });

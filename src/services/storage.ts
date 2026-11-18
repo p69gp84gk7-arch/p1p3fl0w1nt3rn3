@@ -6,7 +6,7 @@ const NET_KEY = 'pipeflow-neige:reseau';
 const SETTINGS_KEY = 'pipeflow-neige:reglages';
 
 /** Informations affichables dans la bulle d'un point. */
-export type NodeLabelField = 'nom' | 'altitude' | 'pression' | 'marge' | 'pression_min' | 'vitesse' | 'debit' | 'charge' | 'modele' | 'couronnes' | 'secteur';
+export type NodeLabelField = 'nom' | 'altitude' | 'pression' | 'pression_vanne' | 'marge' | 'pression_min' | 'vitesse' | 'debit' | 'charge' | 'modele' | 'couronnes' | 'secteur';
 /** Informations affichables sur une canalisation. */
 export type PipeLabelField = 'vitesse' | 'debit' | 'dn' | 'perte' | 'pression' | 'nom';
 
@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   baseLayer: 'ign-plan',
   showPistes: false,
   sheetLink: '',
-  nodeLabels: ['nom', 'pression'],
+  nodeLabels: ['nom', 'pression', 'pression_vanne'],
   labelGuns: true,
   labelOthers: true,
   labelJunctions: false,
@@ -83,7 +83,13 @@ export function saveLocalNetwork(net: Network) {
 export function loadSettings(): Settings {
   const raw = safeGet(SETTINGS_KEY);
   try {
-    return { ...DEFAULT_SETTINGS, ...(raw ? JSON.parse(raw) : {}) };
+    const s: Settings & { v?: number } = { ...DEFAULT_SETTINGS, ...(raw ? JSON.parse(raw) : {}) };
+    // v2 : ajout de la pression à la vanne à côté de la pression au regard.
+    if ((s.v ?? 1) < 2) {
+      if (s.nodeLabels.includes('pression') && !s.nodeLabels.includes('pression_vanne')) s.nodeLabels = [...s.nodeLabels, 'pression_vanne'];
+      s.v = 2;
+    }
+    return s;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -99,10 +105,10 @@ export function normalizeNetwork(n: Partial<Network>): Network {
   const node0 = makeNode('jonction', 0, 0, e.params);
   return {
     nodes: (n.nodes ?? []).map((x) => ({ ...node0, ...x })),
-    pipes: (n.pipes ?? []).map((p) => ({ ...p, calque: p.calque ?? 'existant', geometrie: p.geometrie ?? [] })),
+    pipes: (n.pipes ?? []).map((p) => ({ ...p, calque: p.calque ?? 'existant', geometrie: p.geometrie ?? [], diametre_estime: p.diametre_estime ?? false })),
     calques: n.calques?.length ? n.calques : e.calques,
     catalogue: n.catalogue?.length ? n.catalogue : e.catalogue,
-    modeles: n.modeles?.length ? n.modeles : e.modeles,
+    modeles: (n.modeles?.length ? n.modeles : e.modeles).map((m) => ({ ...m, pression_regulation_bar: m.pression_regulation_bar ?? 0 })),
     scenarios: n.scenarios ?? [],
     params: { ...e.params, ...(n.params ?? {}) },
   };

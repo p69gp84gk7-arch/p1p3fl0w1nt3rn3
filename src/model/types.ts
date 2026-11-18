@@ -93,6 +93,8 @@ export interface Pipe {
   notes: string;
   /** Calque (id) auquel appartient l'élément. */
   calque: string;
+  /** Diamètre estimé (calage / dimensionnement), à confirmer sur le terrain. */
+  diametre_estime: boolean;
 }
 
 /** Calque : regroupe des éléments (réseau existant, projets futurs…). */
@@ -127,6 +129,8 @@ export interface GunModel {
   pression_min_bar: number;
   pression_max_bar: number;
   k_buse: number;
+  /** Régulation de pression de la vanne du canon (bar, 0 = aucune). */
+  pression_regulation_bar: number;
 }
 
 export interface ScenarioEntry {
@@ -185,6 +189,8 @@ export interface NodeResult {
   debit_m3h: number;
   /** Surpresseur : pression à l'aspiration (bar). */
   pression_aspiration_bar?: number;
+  /** Canon : pression après la vanne régulée (bar) = min(pression au regard, régulation). */
+  pression_vanne_bar?: number;
   /** Vitesse de l'eau dans la (les) canalisation(s) qui alimente(nt) le nœud (m/s, la plus forte). */
   vitesse_arrivee_m_s: number;
   /** Débit arrivant au nœud (m³/h). */

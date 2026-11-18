@@ -53,6 +53,8 @@ interface State {
   mobileSheet: MobileSheet;
   /** Mise en pression en cours (id de la station), le réseau se remplit en bleu. */
   filling: string | null;
+  /** Remplissage par le bas des zones alimentées par un booster : niveau d'eau (m) par booster. */
+  fillLevels: Record<string, number>;
 
   /** Applique une modification (avec annulation). */
   commit(next: Network, label?: string): void;
@@ -102,6 +104,7 @@ export const useStore = create<State>((set, get) => ({
   fitToken: 0,
   mobileSheet: null,
   filling: null,
+  fillLevels: {},
 
   commit(next) {
     const { net, past } = get();

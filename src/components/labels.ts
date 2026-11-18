@@ -19,7 +19,8 @@ interface NodeFieldDef {
 export const NODE_FIELDS: NodeFieldDef[] = [
   { id: 'nom', label: 'Nom / numéro', help: 'Nom ou numéro du point', sample: '<b>318</b>' },
   { id: 'altitude', label: 'Altitude', help: 'Altitude du terrain lue depuis le GPS (IGN), en mètres', sample: '⛰ 1 853 m' },
-  { id: 'pression', label: 'Pression calculée', help: 'Pression disponible au point, en bar — rouge si inférieure à la pression mini du canon', sample: 'P 42,6 bar', needsResults: true },
+  { id: 'pression', label: 'Pression au regard', help: 'Pression du réseau au regard, en bar — rouge si inférieure à la pression mini du canon', sample: 'P 52,6 bar', needsResults: true },
+  { id: 'pression_vanne', label: 'Pression à la vanne', help: 'Pression après la vanne régulée du canon (ex. Revo / Rubis : régulée à 45 bar) — égale à celle du regard en dessous', sample: 'Pv 45,0 bar', needsResults: true },
   { id: 'marge', label: 'Marge de pression', help: 'Pression calculée moins pression mini requise (bar) — négatif = canon sous-alimenté', sample: 'Δ +24,6', needsResults: true },
   { id: 'pression_min', label: 'Pression mini requise', help: 'Pression minimale de fonctionnement du canon (bar)', sample: 'min 18 bar' },
   { id: 'vitesse', label: 'Vitesse d’arrivée', help: 'Vitesse de l’eau dans la canalisation qui alimente le point (m/s)', sample: 'V 0,7 m/s', needsResults: true },
@@ -49,7 +50,7 @@ export const PIPE_FIELDS: PipeFieldDef[] = [
 const n0 = (v: number) => fmt(v, 0);
 
 /** HTML de la bulle d'un point (vide si rien à afficher). */
-export function nodeBubble(n: NetNode, r: NodeResult | undefined, fields: NodeLabelField[]): string {
+export function nodeBubble(n: NetNode, r: NodeResult | undefined, fields: NodeLabelField[], dry?: string): string {
   const parts: string[] = [];
   const hasP = r && Number.isFinite(r.pression_bar);
   const consumer = isConsumer(n.type);
@@ -62,11 +63,18 @@ export function nodeBubble(n: NetNode, r: NodeResult | undefined, fields: NodeLa
         parts.push(`⛰ ${n0(n.altitude_m)} m`);
         break;
       case 'pression':
-        if (hasP) {
+        if (dry) parts.push(`<span class="dry">vide · ${escapeHtml(dry)}</span>`);
+        else if (hasP) {
           const low = consumer && n.actif && r!.pression_bar < n.pression_min_bar;
           const neg = r!.pression_bar < 0;
           parts.push(`<span class="${low || neg ? 'ko' : ''}">P ${fmt(r!.pression_bar, 1)} bar</span>`);
         } else if (r && r.statut === 'isole') parts.push('<span class="dry">sec</span>');
+        break;
+      case 'pression_vanne':
+        if (!dry && hasP && consumer && r!.pression_vanne_bar !== undefined) {
+          const reg = r!.pression_vanne_bar < r!.pression_bar - 0.05;
+          parts.push(`<span class="${r!.pression_vanne_bar < n.pression_min_bar && n.actif ? 'ko' : ''}">Pv ${fmt(r!.pression_vanne_bar, 1)} bar${reg ? ' <i>régulée</i>' : ''}</span>`);
+        }
         break;
       case 'marge':
         if (hasP && consumer) {

@@ -5,6 +5,7 @@ import { buildNetwork, defaultImportChoices, mergeKml, withPointOverrides, type 
 import { applyFlowTable, readFlowTable } from '../import/csv';
 import { applyMinPressures, DEFAULT_MODELES, emptyNetwork } from '../model/defaults';
 import { calibrateSource } from '../hydraulics/calage';
+import { allOpenNetwork, calibrateUniform, candidateSpecs, withUniformSpec } from '../hydraulics/diametres';
 import type { Network } from '../model/types';
 
 export const REFERENCE_FILES = {
@@ -14,7 +15,7 @@ export const REFERENCE_FILES = {
 
 export const REFERENCE_NAME = 'Réseau neige – référence';
 /** À incrémenter à chaque évolution du réseau de référence. */
-export const REFERENCE_VERSION = '2026-11-18.3';
+export const REFERENCE_VERSION = '2026-11-19.1';
 
 /** Construit le réseau à partir des fichiers (sans les altitudes). */
 export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Network {
@@ -49,9 +50,11 @@ export function buildReferenceNetwork(kmls: KmlContent[], csvText: string): Netw
     return n;
   });
   // Pressions mini : rubis 18 bar, canons BP 8 bar, autres modèles 12 bar.
-  out.modeles = out.modeles.map((m) => ({ ...m, pression_min_bar: m.modele.toLowerCase() === 'rubis' ? 18 : m.pression_min_bar }));
+  // Rubis et Revo : 18 bar mini, vanne régulée à 45 bar.
+  const regulated = (m: string) => ['rubis', 'revo'].includes(m.toLowerCase());
+  out.modeles = out.modeles.map((m) => (regulated(m.modele) ? { ...m, pression_min_bar: 18, pression_regulation_bar: 45 } : m));
   out.modeles = out.modeles.map((m) =>
-    DEFAULT_MODELES.some((d) => d.modele === m.modele) || m.modele.toLowerCase() === 'rubis' ? m : { ...m, pression_min_bar: out.params.pression_min_defaut_bar },
+    DEFAULT_MODELES.some((d) => d.modele === m.modele) || regulated(m.modele) ? m : { ...m, pression_min_bar: out.params.pression_min_defaut_bar },
   );
   // Abris de sectionnement : vannes (ouvertes), pas des canons.
   out.nodes = out.nodes.map((n) => (/sectionnement/i.test(n.notes) && n.type === 'enneigeur' ? { ...n, type: 'vanne' as const, actif: true, modele: '', debit_m3h: 0 } : n));
@@ -94,5 +97,26 @@ export function calibrateReference(net: Network): Network {
     nodes: net.nodes.map((n) =>
       n.id === sdm.id ? { ...n, pression_consigne_bar: c.consigne, notes: `Pression calée pour ${net.params.calage_pression_bar} bar à l’arrivée du booster (canons fermés). Débit maximal à renseigner.` } : n,
     ),
+  };
+}
+
+/** Mesure relevée sur l'installation : au canon 122, tout ouvert, 15 à 17 bar. */
+export const MESURE_DIAMETRES = { canon: '122', pression_bar: 16 };
+
+/**
+ * Diamètres inconnus (absents des KMZ) : on retient le diamètre de fonte
+ * ductile qui redonne la pression mesurée au canon 122, tous canons ouverts.
+ */
+export function calibrateReferenceDiameters(net: Network): Network {
+  const node = net.nodes.find((n) => n.nom === MESURE_DIAMETRES.canon);
+  if (!node) return net;
+  const specs = candidateSpecs(net.catalogue, 'Fonte ductile', 64);
+  const trials = calibrateUniform(net, allOpenNetwork, node.id, specs, () => true);
+  const best = trials.filter((t) => Number.isFinite(t.pression)).sort((a, b) => Math.abs(a.pression - MESURE_DIAMETRES.pression_bar) - Math.abs(b.pression - MESURE_DIAMETRES.pression_bar))[0];
+  if (!best) return net;
+  const out = withUniformSpec(net, best.spec, () => true);
+  return {
+    ...out,
+    pipes: out.pipes.map((p) => ({ ...p, notes: p.notes || `Diamètre estimé (DN${best.spec.dn}) par calage : ${MESURE_DIAMETRES.pression_bar} bar au canon ${MESURE_DIAMETRES.canon}, tout ouvert. À confirmer.` })),
   };
 }

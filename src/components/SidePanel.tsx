@@ -8,6 +8,7 @@ import { NumField, Row, Section, TextField, Toggle } from './fields';
 import { BASE_LAYERS, fmt, STATUS_COLOR, STATUS_LABEL } from './display';
 import { newId } from '../model/ids';
 import { SheetHeader } from './MobileNav';
+import DiametersDialog from './DiametersDialog';
 import { calibrateSource, pressureAt, type CalageResult } from '../hydraulics/calage';
 import { staticNetwork } from '../model/scenario';
 import { pressurize, stopPressurize } from './pressurize';
@@ -103,6 +104,12 @@ function NodeEditor({ node }: { node: NetNode }) {
             ) : null}
             <StatusBadge statut={r.statut} />
           </div>
+          {r.pression_vanne_bar !== undefined && Number.isFinite(r.pression_bar) && (
+            <div className="small">
+              Pression au regard <b>{fmt(r.pression_bar, 1)} bar</b> · à la vanne <b>{fmt(r.pression_vanne_bar, 1)} bar</b>
+              {r.pression_vanne_bar < r.pression_bar - 0.05 && ' (régulée)'}
+            </div>
+          )}
           {Number.isFinite(r.vitesse_arrivee_m_s) && (
             <div className="small">
               Vitesse de l’eau à l’arrivée : <b>{fmt(r.vitesse_arrivee_m_s, 2)} m/s</b> ({fmt(r.debit_arrivee_m3h, 1)} m³/h)
@@ -426,7 +433,7 @@ function PipeEditor({ pipe }: { pipe: Pipe }) {
             disabled={locked}
             onChange={(e) => {
               const c = net.catalogue.find((x) => x.ref === e.target.value);
-              if (c) up({ dn: c.dn, diametre_int_mm: c.diametre_int_mm, materiau: c.materiau, rugosite_mm: c.rugosite_mm, pn_bar: c.pn_bar });
+              if (c) up({ dn: c.dn, diametre_int_mm: c.diametre_int_mm, materiau: c.materiau, rugosite_mm: c.rugosite_mm, pn_bar: c.pn_bar, diametre_estime: false });
             }}
           >
             <option value="">Personnalisée</option>
@@ -437,8 +444,16 @@ function PipeEditor({ pipe }: { pipe: Pipe }) {
             ))}
           </select>
         </Row>
+        {pipe.diametre_estime && (
+          <div className="notice small">
+            Diamètre <b>estimé</b> (non relevé).{' '}
+            <button className="linklike" disabled={locked} onClick={() => up({ diametre_estime: false })}>
+              Marquer comme réel
+            </button>
+          </div>
+        )}
         <Row label="DN">
-          <NumField value={pipe.dn} digits={0} onChange={(v) => up({ dn: v })} disabled={locked} />
+          <NumField value={pipe.dn} digits={0} onChange={(v) => up({ dn: v, diametre_estime: false })} disabled={locked} />
         </Row>
         <Row label="Ø intérieur">
           <NumField value={pipe.diametre_int_mm} unit="mm" digits={1} onChange={(v) => up({ diametre_int_mm: v })} disabled={locked} />
@@ -517,6 +532,7 @@ function DrawSpecPicker() {
 }
 
 function Overview() {
+  const [diamOpen, setDiamOpen] = useState(false);
   const net = useStore((s) => s.net);
   const settings = useStore((s) => s.settings);
   const results = useStore((s) => s.results);
@@ -573,6 +589,9 @@ function Overview() {
 
       <Section title="Outils">
         <div className="stack">
+          <button className="btn" onClick={() => setDiamOpen(true)} disabled={!net.pipes.length}>
+            📏 Diamètres : caler sur une mesure / dimensionner
+          </button>
           <button className="btn" onClick={() => st().fillAltitudes(undefined, true)} disabled={!net.nodes.length}>
             ⛰ Recalculer toutes les altitudes (GPS)
           </button>
@@ -586,6 +605,7 @@ function Overview() {
           </button>
         </div>
       </Section>
+      {diamOpen && <DiametersDialog onClose={() => setDiamOpen(false)} />}
     </div>
   );
 }
@@ -822,7 +842,19 @@ function StationCard({ node: n }: { node: NetNode }) {
           checked={running}
           disabled={locked}
           onChange={setRunning}
-          label={running ? (isSdm ? 'Pompage en marche' : 'En service') : isSdm ? 'Pompage arrêté' : isBooster ? 'Arrêté (ligne non alimentée)' : 'Hors service'}
+          label={
+            running
+              ? isSdm
+                ? 'Pompage en marche'
+                : isBooster && r && !Number.isFinite(r.pression_bar)
+                  ? '⏳ En attente d’eau'
+                  : 'En service'
+              : isSdm
+                ? 'Pompage arrêté'
+                : isBooster
+                  ? 'Arrêté (ligne non alimentée)'
+                  : 'Hors service'
+          }
         />
         {(isSdm || isBooster) && (
           <button

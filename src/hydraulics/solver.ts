@@ -372,6 +372,7 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>, 
     return i === undefined ? undefined : H[i];
   };
   const modelMax = new Map(net.modeles.map((m) => [m.modele, m.pression_max_bar]));
+  const modelReg = new Map(net.modeles.map((m) => [m.modele, m.pression_regulation_bar || 0]));
 
   for (const n of net.nodes) {
     const hd = headOf(n.id);
@@ -414,7 +415,8 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>, 
         result.totals.enneigeurs_ok += 1;
       }
       const pmax = modelMax.get(n.modele);
-      if (pmax && P > pmax) {
+      const reg = modelReg.get(n.modele) ?? 0;
+      if (pmax && P > pmax && !(reg > 0 && reg <= pmax)) {
         if (statut === 'ok') statut = 'alerte';
         msgs.push(`Pression supérieure au maximum du modèle (${pmax} bar).`);
       }
@@ -424,6 +426,10 @@ function solveOnce(net: Network, opts: SolverOptions, passThrough: Set<string>, 
       msgs.push('Pression négative : risque de dépression / cavitation.');
     }
     const r: NodeResult = { id: n.id, charge_m: hd, pression_bar: P, debit_m3h: q, statut, messages: msgs, vitesse_arrivee_m_s: NaN, debit_arrivee_m3h: 0 };
+    if (isConsumer(n.type)) {
+      const reg = modelReg.get(n.modele) ?? 0;
+      r.pression_vanne_bar = reg > 0 ? Math.min(P, reg) : P;
+    }
     const bi = boosterInlet.get(n.id);
     if (bi !== undefined) {
       const Pin = (H[bi] - n.altitude_m) * barPerM;
@@ -672,7 +678,7 @@ export function solve(net: Network, opts: SolverOptions = {}): SolveResult {
       } else {
         res.statut = 'alerte';
         res.messages.push(
-          `Booster désamorcé : l’eau n’arrive pas jusqu’à lui${Number.isFinite(Pin) ? ` (pression d’arrivée ${Pin.toFixed(1).replace('.', ',')} bar)` : ''}. Augmentez la pression de l’usine.`,
+          `En attente d’eau (désamorcé) : le booster démarrera dès que l’eau lui arrivera${Number.isFinite(Pin) ? ` — pression d’arrivée actuelle ${Pin.toFixed(1).replace('.', ',')} bar` : ''}. Augmentez la pression de l’usine.`,
         );
       }
     } else if (s === 'bypass') {

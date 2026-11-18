@@ -28,7 +28,7 @@ export const NODE_COLUMNS: (keyof NetNode)[] = [
 ];
 export const PIPE_COLUMNS: (keyof Pipe)[] = [
   'id', 'nom', 'amont', 'aval', 'longueur_m', 'longueur_auto', 'dn', 'diametre_int_mm', 'materiau',
-  'rugosite_mm', 'pn_bar', 'k_singulier', 'statut', 'geometrie', 'notes', 'calque',
+  'rugosite_mm', 'pn_bar', 'k_singulier', 'statut', 'geometrie', 'notes', 'calque', 'diametre_estime',
 ];
 export const LAYER_COLUMNS: (keyof Layer)[] = ['id', 'nom', 'couleur', 'visible', 'calcul', 'verrouille', 'description'];
 
@@ -175,6 +175,7 @@ export function rowsToNetwork(data: Record<string, Row[]>): Network {
       geometrie: decodeGeometry(r.geometrie),
       notes: str(r.notes),
       calque: str(r.calque).trim() || 'existant',
+      diametre_estime: bool(r.diametre_estime, false),
     }));
   const calques: Layer[] = (data[SHEETS.layers] ?? [])
     .filter((r) => str(r.id).trim() !== '')
@@ -214,6 +215,7 @@ export function rowsToNetwork(data: Record<string, Row[]>): Network {
       pression_min_bar: num(r.pression_min_bar),
       pression_max_bar: num(r.pression_max_bar),
       k_buse: num(r.k_buse),
+      pression_regulation_bar: num(r.pression_regulation_bar),
     }));
   const scenMap = new Map<string, Scenario>();
   for (const r of data[SHEETS.scenarios] ?? []) {
@@ -255,6 +257,7 @@ export function resultsToRows(net: Network, res: SolveResult): Record<string, Ro
         altitude_m: n.altitude_m,
         charge_m: r && Number.isFinite(r.charge_m) ? round(r.charge_m, 2) : '',
         pression_bar: r && Number.isFinite(r.pression_bar) ? round(r.pression_bar, 2) : '',
+        pression_vanne_bar: r?.pression_vanne_bar !== undefined && Number.isFinite(r.pression_vanne_bar) ? round(r.pression_vanne_bar, 2) : '',
         debit_m3h: r ? round(r.debit_m3h, 2) : '',
         vitesse_arrivee_m_s: r && Number.isFinite(r.vitesse_arrivee_m_s) ? round(r.vitesse_arrivee_m_s, 3) : '',
         debit_arrivee_m3h: r ? round(r.debit_arrivee_m3h, 2) : '',

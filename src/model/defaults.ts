@@ -45,10 +45,10 @@ export const DEFAULT_CATALOGUE: PipeSpec[] = [
 ];
 
 export const DEFAULT_MODELES: GunModel[] = [
-  { modele: 'Ventilateur standard', type: 'ventilateur', debit_nominal_m3h: 30, debit_min_m3h: 5, debit_max_m3h: 60, pression_min_bar: 10, pression_max_bar: 50, k_buse: 5 },
-  { modele: 'Ventilateur grand débit', type: 'ventilateur', debit_nominal_m3h: 50, debit_min_m3h: 10, debit_max_m3h: 90, pression_min_bar: 12, pression_max_bar: 50, k_buse: 8 },
-  { modele: 'Perche standard', type: 'perche', debit_nominal_m3h: 15, debit_min_m3h: 3, debit_max_m3h: 25, pression_min_bar: 20, pression_max_bar: 60, k_buse: 2.5 },
-  { modele: 'Perche basse pression', type: 'perche', debit_nominal_m3h: 8, debit_min_m3h: 2, debit_max_m3h: 15, pression_min_bar: 12, pression_max_bar: 40, k_buse: 1.8 },
+  { modele: 'Ventilateur standard', type: 'ventilateur', debit_nominal_m3h: 30, debit_min_m3h: 5, debit_max_m3h: 60, pression_min_bar: 10, pression_max_bar: 50, k_buse: 5 , pression_regulation_bar: 0 },
+  { modele: 'Ventilateur grand débit', type: 'ventilateur', debit_nominal_m3h: 50, debit_min_m3h: 10, debit_max_m3h: 90, pression_min_bar: 12, pression_max_bar: 50, k_buse: 8 , pression_regulation_bar: 0 },
+  { modele: 'Perche standard', type: 'perche', debit_nominal_m3h: 15, debit_min_m3h: 3, debit_max_m3h: 25, pression_min_bar: 20, pression_max_bar: 60, k_buse: 2.5 , pression_regulation_bar: 0 },
+  { modele: 'Perche basse pression', type: 'perche', debit_nominal_m3h: 8, debit_min_m3h: 2, debit_max_m3h: 15, pression_min_bar: 12, pression_max_bar: 40, k_buse: 1.8 , pression_regulation_bar: 0 },
 ];
 
 export const DEFAULT_LAYERS: Layer[] = [
@@ -165,6 +165,7 @@ export function makePipe(amont: string, aval: string, spec: PipeSpec = DEFAULT_P
     geometrie: [],
     notes: '',
     calque: 'existant',
+    diametre_estime: false,
     ...extra,
   };
 }

@@ -136,7 +136,8 @@ function GunsTable() {
               <th className="num">Débit m³/h</th>
               <th className="num">Alt. m</th>
               <th className="num">P mini</th>
-              <th className="num">Pression bar</th>
+              <th className="num">P regard bar</th>
+              <th className="num">P vanne bar</th>
               <th className="num">Vitesse arrivée m/s</th>
               <th className="num">Q arrivée m³/h</th>
               <th>État</th>
@@ -173,6 +174,7 @@ function GunsTable() {
                   <td className="num">
                     <b>{r ? fmt(r.pression_bar, 1) : ''}</b>
                   </td>
+                  <td className="num">{r?.pression_vanne_bar !== undefined ? fmt(r.pression_vanne_bar, 1) : ''}</td>
                   <td className="num">{r ? fmt(r.vitesse_arrivee_m_s, 2) : ''}</td>
                   <td className="num">{r && r.debit_arrivee_m3h > 0 ? fmt(r.debit_arrivee_m3h, 1) : ''}</td>
                   <td>{r && <Dot statut={r.statut} />}</td>

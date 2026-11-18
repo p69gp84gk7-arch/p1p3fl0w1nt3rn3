@@ -2011,3 +2011,84 @@ table.mini tbody tr {
   border-color: #e0a106;
   background: #fff6e0;
 }
+
+/* ---------- Canons groupés par piste ---------- */
+table.grouped tbody.piste-group + tbody.piste-group .piste-row td {
+  border-top: 2px solid var(--line);
+}
+.piste-row {
+  background: #f4f8fd;
+}
+.piste-row:hover {
+  background: #e9f2fc !important;
+}
+.piste-row td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.piste-row.has-low {
+  background: #fdf1f1;
+}
+.chevron {
+  display: inline-block;
+  width: 12px;
+  color: var(--muted);
+}
+.badge-low {
+  margin-left: 10px;
+  background: var(--ko);
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+tr.low-pressure td {
+  background: #fdecec;
+  color: #a51d1d;
+}
+tr.low-pressure td b {
+  color: #c62828;
+}
+tr.low-pressure:hover td {
+  background: #fadcdc;
+}
+.ko-text {
+  color: #c62828;
+  font-weight: 600;
+}
+/* Pistes (panneau latéral) */
+.pistes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pistes li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 8px;
+}
+.pistes li.low {
+  background: #fdf1f1;
+}
+.pistes .piste-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pistes .piste-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pistes select {
+  width: auto;
+  padding: 2px 4px;
+  font-size: 12px;
+}

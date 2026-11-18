@@ -9,6 +9,7 @@ import { BASE_LAYERS, fmt, STATUS_COLOR, STATUS_LABEL } from './display';
 import { newId } from '../model/ids';
 import { SheetHeader } from './MobileNav';
 import DiametersDialog from './DiametersDialog';
+import { isUnderPressure } from './BottomDrawer';
 import { calibrateSource, pressureAt, type CalageResult } from '../hydraulics/calage';
 import { staticNetwork } from '../model/scenario';
 import { pressurize, stopPressurize } from './pressurize';
@@ -568,6 +569,8 @@ function Overview() {
         </div>
       </Section>
 
+      <PistesSection />
+
       <PumpingSection />
 
       <LayersManager />
@@ -1056,5 +1059,69 @@ export function UnsavedBanner() {
         ✕
       </button>
     </div>
+  );
+}
+
+/** Démarrer / arrêter une piste entière d'un coup. */
+function PistesSection() {
+  const net = useStore((s) => s.net);
+  const results = useStore((s) => s.results);
+  const st = useStore.getState;
+  const locked = new Set(net.calques.filter((l) => l.verrouille).map((l) => l.id));
+  const pistes = useMemo(() => {
+    const m = new Map<string, NetNode[]>();
+    for (const n of net.nodes) {
+      if (!isConsumer(n.type)) continue;
+      const k = n.secteur || '(sans piste)';
+      (m.get(k) ?? m.set(k, []).get(k)!).push(n);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr'));
+  }, [net.nodes]);
+  if (!pistes.length) return null;
+  const apply = (ids: Set<string>, patch: (n: NetNode) => Partial<NetNode>) => {
+    st().commit({ ...st().net, nodes: st().net.nodes.map((n) => (ids.has(n.id) && !locked.has(n.calque) ? { ...n, ...patch(n) } : n)) });
+    if (st().results) st().runCalc();
+  };
+  return (
+    <Section title="Pistes">
+      <ul className="pistes">
+        {pistes.map(([k, guns]) => {
+          const on = guns.filter((n) => n.actif).length;
+          const q = guns.filter((n) => n.actif).reduce((a, n) => a + effectiveFlow(n), 0);
+          const rouges = guns.filter((n) => isUnderPressure(n, results?.nodes[n.id])).length;
+          const ids = new Set(guns.map((n) => n.id));
+          return (
+            <li key={k} className={rouges ? 'low' : ''}>
+              <Toggle checked={on > 0} onChange={(v) => apply(ids, () => ({ actif: v }))} />
+              <span className="piste-name">
+                <b>{k}</b>
+                <span className="small muted">
+                  {on}/{guns.length} en marche{on > 0 && ` · ${fmt(q, 0)} m³/h`}
+                  {rouges > 0 && <span className="ko-text"> · {rouges} sous P mini</span>}
+                </span>
+              </span>
+              <select
+                value="__"
+                title="Couronnes pour toute la piste"
+                onChange={(e) => {
+                  const c = e.target.value as Couronnes;
+                  apply(ids, (n) => (c === '' || n[couronneField(c)] > 0 ? { couronnes: c } : {}));
+                }}
+              >
+                <option value="__" disabled>
+                  Couronnes
+                </option>
+                {COURONNES.map((c) => (
+                  <option key={c} value={c}>
+                    {c.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="small muted">Interrupteur : démarre ou arrête tous les canons de la piste. Le détail canon par canon est dans « Regards & enneigeurs ».</p>
+    </Section>
   );
 }
